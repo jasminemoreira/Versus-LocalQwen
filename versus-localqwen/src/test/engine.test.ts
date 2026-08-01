@@ -8,6 +8,7 @@ import { StateEngine, LOOP_FAILURE_THRESHOLD } from "../state/engine";
 import { ScoreBreakdown } from "../state/types";
 import { getCompleteGuidance } from "../rules/full-guidance";
 import { withNumCtx } from "../ollama/align";
+import { applyPatch, inspect, PATCH_MARKER, revertPatch } from "../ollama/estimator-patch";
 import {
   advertisedBudget,
   assessAlignment,
@@ -652,6 +653,62 @@ test("a violated safeguard vetoes the transition and says which", () => {
   } finally {
     cleanTempWorkspace(tmp);
   }
+});
+
+console.log("\n=== Ollama Estimator Clamp Tests ===\n");
+
+const PROVIDER_LINE =
+  "        this.charsPerToken.set(modelID, (currentCharsPerToken + observedCharsPerToken) / 2);";
+
+function fakeProvider(body: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "versus-provider-"));
+  const file = path.join(dir, "provider.js");
+  fs.writeFileSync(file, body, "utf-8");
+  return file;
+}
+
+test("inspect distinguishes patchable, patched and rewritten providers", () => {
+  const plain = fakeProvider(`const defaultCharsPerToken = 4;\n${PROVIDER_LINE}\n`);
+  assert.strictEqual(inspect(plain), "patchable");
+
+  applyPatch(plain);
+  assert.strictEqual(inspect(plain), "patched");
+
+  // Upstream fixing or rewriting record() must read as unknown, never as
+  // patchable — guessing at a changed shape is how you corrupt someone else's
+  // extension.
+  const rewritten = fakeProvider("this.charsPerToken.set(modelID, tokenize(text));\n");
+  assert.strictEqual(inspect(rewritten), "unknown-shape");
+
+  assert.strictEqual(inspect(path.join(os.tmpdir(), "versus-absent", "provider.js")), "missing");
+});
+
+test("applyPatch is idempotent, backs up, and preserves the rest of the file", () => {
+  const body = `const defaultCharsPerToken = 4;\n// sentinel\n${PROVIDER_LINE}\n// tail\n`;
+  const file = fakeProvider(body);
+
+  const first = applyPatch(file);
+  assert.ok(first.changed);
+  const patched = fs.readFileSync(file, "utf-8");
+  assert.ok(patched.includes(PATCH_MARKER));
+  assert.ok(patched.includes("Math.max(defaultCharsPerToken"));
+  assert.ok(patched.includes("// sentinel") && patched.includes("// tail"));
+  assert.strictEqual(fs.readFileSync(`${file}.versus-backup`, "utf-8"), body);
+
+  // A second run must not stack a second clamp — activation calls this every time.
+  const second = applyPatch(file);
+  assert.ok(!second.changed);
+  assert.strictEqual((fs.readFileSync(file, "utf-8").match(/Math\.max/g) ?? []).length, 1);
+});
+
+test("revertPatch restores the original byte for byte", () => {
+  const body = `const defaultCharsPerToken = 4;\n${PROVIDER_LINE}\n`;
+  const file = fakeProvider(body);
+  applyPatch(file);
+  const result = revertPatch(file);
+  assert.ok(result.changed);
+  assert.strictEqual(fs.readFileSync(file, "utf-8"), body);
+  assert.strictEqual(inspect(file), "patchable");
 });
 
 console.log("\n=== All tests completed ===\n");

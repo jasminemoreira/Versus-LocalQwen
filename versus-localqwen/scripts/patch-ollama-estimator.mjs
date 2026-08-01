@@ -1,41 +1,32 @@
 #!/usr/bin/env node
 
-// Stops the Ollama provider's token estimate from collapsing.
+// Command-line front end for the Ollama estimator clamp.
 //
-// The provider does not tokenize. It keeps a chars-per-token ratio and
-// recalibrates after every response as `text.length / prompt_eval_count`, where
-// text.length comes from partToText — which returns '' for tool calls, tool
-// results and non-text parts, while prompt_eval_count covers the whole prompt.
-// In an agent session most of the prompt is what the numerator drops, so each
-// tool-heavy turn halves the distance to a much smaller ratio. Measured on
-// qwen3.6: 4.00 at rest, ~1.8 after one turn, ~0.75 by the third. countTokens
-// then prices text several times over and the host compacts with most of the
-// window free.
-//
-// The patch clamps the ratio so it can never fall below the provider's own
-// default. Upward calibration still works — a model that genuinely runs coarser
-// than 4 chars/token will still be learned — but the downward collapse, which
-// is an artifact of the mismatched numerator rather than a real measurement,
-// cannot happen.
-//
-// This edits a third-party extension, so an Ollama update reverts it. Re-run.
-// Reverting by hand: restore the .versus-backup file next to provider.js.
+// The extension applies this on activation, so running it by hand is only
+// needed when auto-patching is off or when you want the result before the next
+// extension host start. Either way the logic lives in src/ollama/estimator-patch.ts
+// — one implementation, so the script and the extension cannot drift apart.
 //
 // Usage: node scripts/patch-ollama-estimator.mjs [--revert] [--extensions-dir DIR]
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync } from "fs";
-import { join } from "path";
+import { existsSync } from "fs";
 import { homedir } from "os";
+import { dirname, join, resolve } from "path";
+import { fileURLToPath } from "url";
 
-const MARKER = "/* versus-localqwen: floor clamped */";
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const compiled = join(root, "out", "ollama", "estimator-patch.js");
 
-const ORIGINAL =
-  "        this.charsPerToken.set(modelID, (currentCharsPerToken + observedCharsPerToken) / 2);";
-const PATCHED =
-  "        this.charsPerToken.set(modelID, Math.max(defaultCharsPerToken, " +
-  `(currentCharsPerToken + observedCharsPerToken) / 2)); ${MARKER}`;
+if (!existsSync(compiled)) {
+  console.error(
+    "Build output missing. Run `npm run compile` first — this script is a front end " +
+      "for src/ollama/estimator-patch.ts rather than a second copy of it."
+  );
+  process.exit(1);
+}
 
-/** Every place VS Code keeps extensions, desktop and remote alike. */
+const { applyPatch, findProviders, inspect, revertPatch } = await import(compiled);
+
 function candidateRoots() {
   const home = homedir();
   return [
@@ -44,55 +35,6 @@ function candidateRoots() {
     join(home, ".vscode-server-insiders", "extensions"),
     join(home, ".vscode-insiders", "extensions"),
   ];
-}
-
-function findProviders(roots) {
-  const found = [];
-  for (const root of roots) {
-    if (!existsSync(root)) continue;
-    for (const entry of readdirSync(root)) {
-      if (!/^ollama\.ollama-/i.test(entry)) continue;
-      const provider = join(root, entry, "out", "provider.js");
-      if (existsSync(provider)) found.push(provider);
-    }
-  }
-  return found;
-}
-
-function apply(file, revert) {
-  const backup = `${file}.versus-backup`;
-  const source = readFileSync(file, "utf-8");
-
-  if (revert) {
-    if (!existsSync(backup)) {
-      console.log(`  skip   ${file}\n         no backup to restore`);
-      return false;
-    }
-    copyFileSync(backup, file);
-    console.log(`  revert ${file}`);
-    return true;
-  }
-
-  if (source.includes(MARKER)) {
-    console.log(`  ok     ${file}\n         already patched`);
-    return false;
-  }
-
-  if (!source.includes(ORIGINAL)) {
-    console.log(
-      `  FAIL   ${file}\n` +
-        "         the calibration line was not found — the provider changed shape.\n" +
-        "         Inspect CalibratedTokenEstimator.record() before patching by hand."
-    );
-    return false;
-  }
-
-  if (!existsSync(backup)) {
-    copyFileSync(file, backup);
-  }
-  writeFileSync(file, source.replace(ORIGINAL, PATCHED), "utf-8");
-  console.log(`  patch  ${file}\n         backup at ${backup}`);
-  return true;
 }
 
 const args = process.argv.slice(2);
@@ -106,15 +48,25 @@ if (providers.length === 0) {
   process.exit(1);
 }
 
-console.log(revert ? "Reverting:" : "Patching:");
+console.log(revert ? "Reverting:" : "Clamping:");
 let changed = 0;
 for (const provider of providers) {
-  if (apply(provider, revert)) changed += 1;
+  const before = inspect(provider);
+  const result = revert ? revertPatch(provider) : applyPatch(provider);
+  const verb = result.changed ? (revert ? "revert" : "patch") : before === "patched" ? "ok" : "skip";
+  console.log(`  ${verb.padEnd(6)} ${provider}\n         ${result.message}`);
+  if (result.changed) changed += 1;
 }
 
 if (changed > 0) {
   console.log(
-    "\nRestart the extension host for this to take effect:\n" +
-      "  Ctrl+Shift+P -> Developer: Restart Extension Host"
+    "\nRestart the extension host for this to take effect — the running one still holds\n" +
+      "the previous copy:\n  Ctrl+Shift+P -> Developer: Restart Extension Host"
   );
+  if (revert) {
+    console.log(
+      "\nThe extension reapplies the clamp on activation. To keep it off, set\n" +
+        "  versus-localqwen.autoPatchOllamaEstimator: false"
+    );
+  }
 }

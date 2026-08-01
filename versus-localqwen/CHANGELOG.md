@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.4.0] - 2026-07-27
+
+### Added
+
+- **The Ollama estimator clamp is reapplied on activation.** An Ollama update
+  installs into a new versioned directory, so the clamp is silently gone and the
+  only symptom is the usable-tokens figure sliding again mid-session. Seen in
+  practice within hours: 0.0.5 → 0.0.6, and a freshly restarted host already
+  measured 1.80x. The provider's `record()` and `partToText` are byte-identical
+  in 0.0.6, so nothing was fixed upstream — the patch simply went with the old
+  directory.
+
+  The check is silent when there is nothing to do. When it does reapply, it says
+  so and asks for a restart, because the ordering cannot be worked around: by the
+  time this extension activates, the Ollama extension has already loaded
+  `provider.js` into memory, so a patch written now takes effect at the *next*
+  host start and the current session still runs unclamped.
+
+  A provider whose `record()` no longer matches the known line reads as
+  `unknown-shape` and is left alone rather than guessed at — that is what an
+  upstream fix would look like.
+
+- **`versus-localqwen.autoPatchOllamaEstimator`** (default `true`) and the
+  **Clamp Ollama Token Estimator** command, which asks before writing. Set the
+  setting to `false` to be prompted instead, or to leave the provider untouched;
+  `npm run unpatch-ollama` now points this out, since otherwise activation would
+  quietly undo a deliberate revert.
+
+### Changed
+
+- The patch logic moved to `src/ollama/estimator-patch.ts` and
+  `scripts/patch-ollama-estimator.mjs` became a thin front end over it. Two
+  copies of a patch that edits someone else's extension is one copy too many.
+
 ## [0.3.2] - 2026-07-27
 
 Upstream patch from Versus for Claude 0.10.0 (commit 0d2ef6c), adapted: the

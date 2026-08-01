@@ -7,6 +7,7 @@ import { spawnSync } from "child_process";
 import { SidebarProvider } from "./views/sidebar";
 import { ContextStatus } from "./views/context-status";
 import { reportSiblings } from "./views/sibling-check";
+import { ensureEstimatorClamp } from "./views/estimator-patch-ui";
 import { ensureSpecsReadme, AGENT_INSTRUCTIONS_CONTENT } from "./setup";
 import { advertisedBudget, effectiveWindow } from "./ollama/client";
 import { alignModelContext } from "./ollama/align";
@@ -115,6 +116,22 @@ export function activate(context: vscode.ExtensionContext) {
       })
     );
     log("Command refreshView registered.");
+
+    // The clamp lives in the Ollama extension's files, so an update to it wipes
+    // the patch no matter what this workspace contains. Checked before the
+    // telemetry starts, so the first reading reflects the state we just left.
+    const autoPatch = vscode.workspace
+      .getConfiguration("versus-localqwen")
+      .get<boolean>("autoPatchOllamaEstimator", true);
+    if (autoPatch) {
+      void ensureEstimatorClamp(log, { auto: true });
+    }
+
+    context.subscriptions.push(
+      vscode.commands.registerCommand("versus-localqwen.patchEstimator", () =>
+        ensureEstimatorClamp(log, { auto: false, announceNoop: true })
+      )
+    );
 
     // Context health telemetry — the overflow it watches for is silent, so it
     // has to be reported from outside the conversation.

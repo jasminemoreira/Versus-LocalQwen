@@ -2,7 +2,7 @@
   "name": "versus-localqwen",
   "displayName": "Versus for Local Qwen",
   "description": "IACDM orchestrator for local models served by Ollama in VS Code Agent Mode. Adds a context-budget guard for architectures without KV cache shifting, where overflow kills generation silently.",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "publisher": "JasmineMoreira",
   "author": "Jasmine Moreira",
   "license": "MIT",
@@ -78,6 +78,10 @@
       {
         "command": "versus-localqwen.setCompactionThreshold",
         "title": "Versus LocalQwen: Set Compaction Threshold"
+      },
+      {
+        "command": "versus-localqwen.patchEstimator",
+        "title": "Versus LocalQwen: Clamp Ollama Token Estimator"
       }
     ],
     "configuration": {
@@ -107,6 +111,11 @@
           "type": "number",
           "default": 0.66,
           "markdownDescription": "When the usable input budget falls below this, Versus offers to reset the Ollama provider's token estimate. Below `1` it is read as a fraction of the budget the host registered for the model; at `100` or above, as an absolute token count. The estimate drifts downward over a session, so this is the point at which the lost window is worth an interruption. Set to `0` to never prompt \u2014 the status bar still reports the live figure."
+        },
+        "versus-localqwen.autoPatchOllamaEstimator": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Reapply the clamp on the Ollama provider's token estimator when an update removes it. The provider does not tokenize; it recalibrates a chars-per-token ratio against text that excludes tool calls and results, so in an agent session the ratio slides down and the usable window shrinks with it. The clamp stops the slide without blocking upward calibration. It edits a file belonging to the Ollama extension and keeps a `.versus-backup` beside it \u2014 set this to `false` to be asked instead, or to leave the provider untouched."
         }
       }
     }
