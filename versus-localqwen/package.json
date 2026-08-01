@@ -1,0 +1,136 @@
+{
+  "name": "versus-localqwen",
+  "displayName": "Versus for Local Qwen",
+  "description": "IACDM orchestrator for local models served by Ollama in VS Code Agent Mode. Adds a context-budget guard for architectures without KV cache shifting, where overflow kills generation silently.",
+  "version": "0.3.2",
+  "publisher": "JasmineMoreira",
+  "author": "Jasmine Moreira",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jasminemoreira/Versus"
+  },
+  "bugs": {
+    "url": "https://github.com/jasminemoreira/Versus/issues"
+  },
+  "homepage": "https://github.com/jasminemoreira/Versus#readme",
+  "keywords": [
+    "ai",
+    "agent",
+    "methodology",
+    "convergence",
+    "ollama",
+    "qwen",
+    "local-llm",
+    "mcp",
+    "safeguards",
+    "architecture",
+    "code-quality"
+  ],
+  "engines": {
+    "vscode": "^1.120.0",
+    "node": ">=18.0.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "icon": "icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "versus-localqwen",
+          "title": "Versus for Local Qwen",
+          "icon": "$(layers)"
+        }
+      ]
+    },
+    "views": {
+      "versus-localqwen": [
+        {
+          "id": "versus-localqwen.phaseView",
+          "name": "Methodology State"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "versus-localqwen.initProject",
+        "title": "Versus LocalQwen: Initialize Project"
+      },
+      {
+        "command": "versus-localqwen.refreshView",
+        "title": "Versus LocalQwen: Refresh Sidebar"
+      },
+      {
+        "command": "versus-localqwen.checkContext",
+        "title": "Versus LocalQwen: Check Context Budget"
+      },
+      {
+        "command": "versus-localqwen.alignContext",
+        "title": "Versus LocalQwen: Align Model Context Window"
+      },
+      {
+        "command": "versus-localqwen.setCompactionThreshold",
+        "title": "Versus LocalQwen: Set Compaction Threshold"
+      }
+    ],
+    "configuration": {
+      "title": "Versus for Local Qwen",
+      "properties": {
+        "versus-localqwen.ollamaUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434",
+          "description": "Base URL of the Ollama server. Must match the URL configured in the Ollama extension. When VS Code runs on Windows and Ollama in WSL, point this at the VM IP or use a WSL remote window."
+        },
+        "versus-localqwen.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model tag to monitor (e.g. qwen3.6:27b). When empty, the first loaded model reported by /api/ps is used, falling back to the first entry in /api/tags."
+        },
+        "versus-localqwen.generationReserve": {
+          "type": "number",
+          "default": 4096,
+          "description": "Tokens reserved for generation. A round is refused when the input leaves less than this margin. Matches the Ollama extension's defaultMaxOutputTokens."
+        },
+        "versus-localqwen.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show context-window health in the status bar."
+        },
+        "versus-localqwen.usableBudgetFloor": {
+          "type": "number",
+          "default": 0.66,
+          "markdownDescription": "When the usable input budget falls below this, Versus offers to reset the Ollama provider's token estimate. Below `1` it is read as a fraction of the budget the host registered for the model; at `100` or above, as an absolute token count. The estimate drifts downward over a session, so this is the point at which the lost window is worth an interruption. Set to `0` to never prompt \u2014 the status bar still reports the live figure."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "compile:mcp": "tsc -p ./tsconfig.mcp.json",
+    "watch": "tsc -watch -p ./",
+    "bundle": "node scripts/bundle.mjs",
+    "build": "npm run compile && npm run compile:mcp && npm run bundle",
+    "lint": "eslint src",
+    "test": "node ./out/test/engine.test.js",
+    "patch-ollama": "node scripts/patch-ollama-estimator.mjs",
+    "unpatch-ollama": "node scripts/patch-ollama-estimator.mjs --revert"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.99.0",
+    "esbuild": "^0.27.3",
+    "eslint": "^9.0.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}

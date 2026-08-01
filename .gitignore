@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+
+# Packaged extensions
+*.vsix
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Workspace methodology state (project-specific, not extension source)
+.versus/
+
+# Environment
+.env
+.env.local

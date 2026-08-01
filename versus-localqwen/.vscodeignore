@@ -1,0 +1,17 @@
+.vscode/**
+.github/**
+.claude/**
+.versus/**
+src/**
+scripts/**
+out/test/**
+out/mcp/**
+out/hooks/**
+node_modules/**
+*.vsix
+*.ts
+!*.d.ts
+tsconfig*.json
+eslint.config.*
+.gitignore
+.eslintrc*
