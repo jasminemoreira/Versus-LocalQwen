@@ -7,8 +7,11 @@
 // budget — and worse, two tools with the same name and different backing
 // servers give the model a choice it has no basis to make.
 //
-// This does not clean up on its own. The other file belongs to another
-// extension, which would simply rewrite it.
+// This does not clean up on its own: the other file belongs to another
+// extension, which would rewrite it anyway. Coexistence is a deliberate design
+// choice in the Versus family, so this reports once and then stays out of the
+// way — a permanent, accepted condition is not something to interrupt about on
+// every activation.
 
 import * as fs from "fs";
 import * as path from "path";
@@ -69,40 +72,50 @@ export function sharesOurBundle(siblings: SiblingRegistration[], ourServerPath: 
   return siblings.some((s) => s.target && path.dirname(s.target) === path.dirname(ourDir));
 }
 
+/** Remembered per workspace, so an accepted condition stops interrupting. */
+const DISMISS_KEY = "versus-localqwen.siblingWarningDismissed";
+
 export function reportSiblings(
   workspace: string,
   ourServerPath: string,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  memento: vscode.Memento
 ): void {
   const siblings = findSiblings(workspace);
   if (siblings.length === 0) return;
 
   const names = siblings.map((s) => `${s.name} (${s.source})`).join(", ");
+  // Always on the record, whether or not it interrupts.
   log(`sibling Versus MCP servers registered: ${names}`);
+
+  if (memento.get<boolean>(DISMISS_KEY)) return;
 
   const detail =
     siblings.map((s) => `${s.name}\n  from ${s.source}\n  → ${s.target ?? "unknown"}`).join("\n\n") +
-    "\n\nEach registration re-sends its full tool schema on every request — roughly 2500 tokens " +
-    "per turn — and duplicate tool names leave the model choosing between them with nothing to " +
-    "go on.\n\nRemove the entries you are not using, or disable the sibling extension in this " +
-    "workspace. Versus keeps its state in .versus/state.json, shared across the family, so " +
-    "nothing is lost by running only one.";
+    "\n\nWhether this costs anything depends on the sibling being enabled in this window. If it " +
+    "is, its tool schemas are re-sent on every request — roughly 2500 tokens — and duplicate tool " +
+    "names leave the model choosing between them with nothing to go on. VS Code's MCP view shows " +
+    "which servers are actually running.\n\nVersus keeps its state in .versus/state.json, shared " +
+    "across the family, so nothing is lost by disabling the ones you are not using here.";
 
   vscode.window
-    .showWarningMessage(
+    .showInformationMessage(
       `Versus: ${siblings.length} other Versus MCP ${siblings.length === 1 ? "server is" : "servers are"} ` +
-        `registered in this workspace (${siblings.map((s) => s.name).join(", ")}). ` +
-        "Their tools are duplicated into every request.",
+        `registered in this workspace (${siblings.map((s) => s.name).join(", ")}).`,
       "Details",
-      "Open config"
+      "Open config",
+      "Don't show again"
     )
     .then((action) => {
       if (action === "Details") {
-        vscode.window.showWarningMessage("Duplicate Versus registrations", { modal: true, detail });
+        vscode.window.showInformationMessage("Duplicate Versus registrations", { modal: true, detail });
       } else if (action === "Open config") {
         const first = siblings[0];
         const file = first.source === ".mcp.json" ? ".mcp.json" : path.join(".vscode", "mcp.json");
         vscode.window.showTextDocument(vscode.Uri.file(path.join(workspace, file)));
+      } else if (action === "Don't show again") {
+        void memento.update(DISMISS_KEY, true);
+        log("sibling warning dismissed for this workspace");
       }
     });
 }

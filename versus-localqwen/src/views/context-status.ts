@@ -5,6 +5,8 @@
 // truncated turn, never an error. Nothing in the chat UI marks it. So the
 // warning has to come from outside the conversation.
 
+import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 import {
   advertisedBudget,
@@ -53,6 +55,13 @@ export class ContextStatus implements vscode.Disposable {
   private warnedForModel: string | null = null;
   private warnedDriftForModel: string | null = null;
   private readonly drift: DriftDetector;
+  /**
+   * One Ollama server backs every VS Code window, and /api/ps reports whatever
+   * is loaded globally. Seeing a second model proves this instance cannot tell
+   * which one belongs to its own chat, so from then on it only speaks about a
+   * model the user named explicitly.
+   */
+  private modelsSeen = new Set<string>();
 
   constructor(private log: (msg: string) => void) {
     this.drift = new DriftDetector(log);
@@ -104,6 +113,7 @@ export class ContextStatus implements vscode.Disposable {
           threshold: readThreshold(),
         };
       } else {
+        this.modelsSeen.add(model);
         const window = await describeWindow(url, model);
         const host = await readHostBudget(model);
         const instance = running.find((m) => m.name === model) ?? null;
@@ -288,9 +298,31 @@ export class ContextStatus implements vscode.Disposable {
     this.item.show();
   }
 
+  /**
+   * Whether this window may interrupt about `model`.
+   *
+   * Two ways to get it wrong, both seen in practice: warning about a model
+   * another window is using, and warning N times because N windows are open.
+   * A notification is only honest when the model is attributable to this window
+   * AND this window is orchestrating a project that the finding could damage.
+   */
+  private mayNotifyAbout(model: string): boolean {
+    const configured = this.config().model;
+    if (configured) return model === configured;
+    // Unattributable: more than one model has passed through the shared server.
+    if (this.modelsSeen.size > 1) return false;
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) return false;
+    return fs.existsSync(path.join(folder.uri.fsPath, ".versus", "state.json"));
+  }
+
   /** Warns once per model, so a misconfigured setup is not silent on first use. */
   private maybeWarn(r: ContextReading): void {
     if (!r.model || !r.window) return;
+    if (!this.mayNotifyAbout(r.model)) {
+      this.log(`suppressing notification for ${r.model}: not attributable to this window`);
+      return;
+    }
 
     // Drift is warned about separately: it can appear mid-session on a setup
     // that was healthy at startup, so it must not be suppressed by an earlier

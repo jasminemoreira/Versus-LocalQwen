@@ -61,10 +61,16 @@ export const checkContextBudgetTool: Tool = {
   },
 };
 
-export async function handleCheckContextBudget(args: {
-  planned_chars?: number;
-  intent?: string;
-}): Promise<string> {
+/**
+ * @param surface Fixed cost of the tool definitions, supplied by the registry.
+ * Computing it here would import the registry that imports this module, and a
+ * cycle leaves the tool list holding undefined entries depending on which side
+ * loads first.
+ */
+export async function handleCheckContextBudget(
+  args: { planned_chars?: number; intent?: string },
+  surface: { toolCount: number; tokens: number }
+): Promise<string> {
   const url = baseUrl();
   const reserve = generationReserve();
 
@@ -128,6 +134,19 @@ export async function handleCheckContextBudget(args: {
       : null;
 
   const problems: string[] = [];
+
+  // Fixed cost first: if the tool definitions do not fit, nothing else matters
+  // and no amount of narrowing the work will help.
+  const toolTokens = surface.tokens;
+  if (real !== null && toolTokens + reserve >= real) {
+    problems.push(
+      `The ${surface.toolCount} Versus tool definitions cost about ${toolTokens} tokens on every ` +
+        `request, and with the ${reserve}-token generation reserve that already meets or exceeds ` +
+        `this model's ${real}-token window. Every turn will be truncated regardless of how small ` +
+        `the work is. This model cannot run the methodology — raise its window or use a larger model.`
+    );
+  }
+
   if (alignment.state === "misaligned") {
     problems.push(
       `The chat host will budget ${advertised.input} input tokens (source: ${advertised.source}) ` +
@@ -173,6 +192,7 @@ export async function handleCheckContextBudget(args: {
       alignment: alignment.state,
     },
     budget: {
+      toolSurfaceTokens: toolTokens,
       generationReserve: reserve,
       safeInputTokens,
       plannedTokens,

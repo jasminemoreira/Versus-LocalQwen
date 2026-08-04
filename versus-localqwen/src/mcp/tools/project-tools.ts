@@ -79,6 +79,18 @@ function deployBundles(workspace: string): boolean {
     fs.mkdirSync(targetDir, { recursive: true });
   }
 
+  // The project's own package.json may declare "type":"module", common in
+  // modern JS projects. That makes Node treat every .js under the project tree
+  // as an ES module — including this CommonJS bundle — which then dies with
+  // "require is not defined in ES module scope" and takes the methodology with
+  // it, silently. Node resolves module type from the nearest package.json, so
+  // one here pins CommonJS for the deploy directory regardless of the project.
+  const pkgPath = path.join(targetDir, "package.json");
+  const pkgContent = JSON.stringify({ type: "commonjs" }, null, 2) + "\n";
+  if (!fs.existsSync(pkgPath) || fs.readFileSync(pkgPath, "utf-8") !== pkgContent) {
+    fs.writeFileSync(pkgPath, pkgContent);
+  }
+
   let deployed = false;
   for (const file of BUNDLE_FILES) {
     const src = path.join(bundleDir, file);

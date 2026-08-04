@@ -1,5 +1,78 @@
 # Changelog
 
+## [0.4.2] - 2026-08-01
+
+### Fixed
+
+- **A project declaring `"type":"module"` silently disabled the methodology.**
+  Node resolves module type from the nearest `package.json`, so a modern JS
+  project marking itself ESM makes every `.js` under its tree an ES module —
+  including the CommonJS bundle deployed to `.versus/localqwen/`. The MCP server
+  then dies with `require is not defined in ES module scope` and Versus is
+  simply absent from that project, with nothing saying why.
+
+  A `package.json` holding `{"type":"commonjs"}` is now written beside the
+  bundle, which pins the module type for that directory whatever the project
+  declares. Applied to both deploy paths — `deployServer` in the extension host
+  and `deployBundles` on the MCP side — since either can run first and the
+  upstream note only covers the former.
+
+  Retroactive fix for an already-broken project: reopening the workspace
+  rewrites the deploy and creates the file.
+
+  Origin: Versus for Claude 0.10.1 (commit 10435c8).
+
+## [0.4.1] - 2026-08-01
+
+### Fixed
+
+- **The sibling-server warning nagged on every activation and overstated its
+  case.** Coexistence is a deliberate design choice in the Versus family, so a
+  modal-toned warning repeated at every startup — and once per open window —
+  was interrupting about a permanent, accepted condition.
+
+  It now shows once per workspace with a "Don't show again" option, is an
+  information message rather than a warning, and always records to the output
+  channel whether or not it interrupts. The claim was also wrong: it asserted
+  the sibling's tools were "duplicated into every request", which depends on
+  that server actually being enabled in this window — something this extension
+  cannot see. It now says so and points at VS Code's MCP view.
+
+- **Notifications fired about models the window was not using.** One Ollama
+  server backs every VS Code window and `/api/ps` reports whatever is loaded
+  globally, so a window working on qwen3.6 warned about `mistral:7b` — a model
+  another window had loaded. With several windows open the same finding was also
+  announced once per window.
+
+  A notification now requires the model to be attributable to this window: the
+  configured `versus-localqwen.model` matches it, or only one model has ever
+  been seen through the shared server and this workspace has an initialised
+  Versus project. The status bar still reports whatever is loaded; only the
+  interruptions are scoped.
+
+### Added
+
+- **`check_context_budget` reports the fixed cost of the tool surface.** The 17
+  tool definitions cost ~2577 tokens on every request before any conversation
+  exists, and a window that cannot hold them truncates every turn regardless of
+  how small the work is — which a payload-sized check never notices.
+
+  Measured in the Ollama log over one day: all 17 truncations happened on
+  windows of 8192 or below (13 of them at 2048), and none at 32k, 64k or 128k.
+  At 2048 the schemas alone are 126% of the window, which is why a tool call
+  there returns "Sorry, no response was returned": the definitions do not fit,
+  so nothing is generated. This is a hard floor for the methodology, not a
+  regression.
+
+### Fixed (introduced and caught in the same change)
+
+- The tool-surface cost was first computed inside `context-tools.ts` by
+  importing `ALL_TOOLS` from the registry that imports it back. Loading
+  `context-tools` first left the array holding an `undefined` entry and the tool
+  crashed. The surface is now computed where the list lives and passed in. The
+  unit test missed it because it required the registry directly, so it never
+  reproduced the load order the MCP server uses.
+
 ## [0.4.0] - 2026-07-27
 
 ### Added

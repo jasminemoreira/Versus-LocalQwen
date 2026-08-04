@@ -711,4 +711,76 @@ test("revertPatch restores the original byte for byte", () => {
   assert.strictEqual(inspect(file), "patchable");
 });
 
+console.log("\n=== Tool Surface Floor Tests ===\n");
+
+test("the tool surface has a minimum viable window, and small models are below it", () => {
+  const { ALL_TOOLS } = require("../mcp/tools/index");
+  const chars = ALL_TOOLS.reduce(
+    (sum: number, t: any) =>
+      sum + JSON.stringify({ name: t.name, description: t.description, parameters: t.inputSchema }).length,
+    0
+  );
+  const toolTokens = Math.ceil(chars / 4.4);
+  const reserve = 4096;
+
+  // Measured in the Ollama log: every truncation observed was on a window of
+  // 8192 or below, none on 32k, 64k or 128k. The schemas alone explain it.
+  for (const window of [1024, 2048, 4096]) {
+    assert.ok(toolTokens + reserve >= window, `${window} must be flagged as unusable`);
+  }
+  for (const window of [32768, 65536]) {
+    assert.ok(toolTokens + reserve < window, `${window} must not be flagged`);
+  }
+
+  // A guard that lets the schemas grow past a working window silently would
+  // reintroduce the failure, so pin the surface with room to notice.
+  assert.ok(toolTokens < 4000, `tool surface grew to ${toolTokens} tokens`);
+});
+
+console.log("\n=== CommonJS Pin Tests ===\n");
+
+test("a CommonJS bundle dies under a type:module project without the pin", () => {
+  const { execFileSync } = require("child_process");
+  const bundle = path.resolve(__dirname, "..", "bundle", "server.js");
+  if (!fs.existsSync(bundle)) {
+    console.log("    (skipped: run npm run bundle first)");
+    return;
+  }
+
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "versus-esm-"));
+  const deployDir = path.join(project, ".versus", "localqwen");
+  fs.mkdirSync(deployDir, { recursive: true });
+  fs.writeFileSync(path.join(project, "package.json"), JSON.stringify({ type: "module" }));
+  fs.copyFileSync(bundle, path.join(deployDir, "server.js"));
+
+  const handshake =
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05",' +
+    '"capabilities":{},"clientInfo":{"name":"t","version":"1"}}}\n';
+  const run = () =>
+    execFileSync("node", [path.join(deployDir, "server.js"), "--workspace", project], {
+      input: handshake,
+      encoding: "utf-8",
+      timeout: 20000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+  try {
+    // Without the pin the project's type:module wins and require() is gone.
+    let failed = false;
+    try { run(); } catch (err: any) {
+      failed = true;
+      const text = String(err.stderr ?? "") + String(err.message ?? "");
+      assert.ok(/require is not defined/.test(text), `expected an ESM failure, got: ${text.slice(0, 200)}`);
+    }
+    assert.ok(failed, "the bundle must fail without the pin — otherwise this test proves nothing");
+
+    // The pin is what deployBundles/deployServer write beside the bundle.
+    fs.writeFileSync(path.join(deployDir, "package.json"), JSON.stringify({ type: "commonjs" }, null, 2) + "\n");
+    const out = run();
+    assert.ok(out.includes('"serverInfo"'), "handshake must succeed once CommonJS is pinned");
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 console.log("\n=== All tests completed ===\n");

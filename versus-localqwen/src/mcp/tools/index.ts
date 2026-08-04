@@ -33,6 +33,21 @@ export const ALL_TOOLS: Tool[] = [
   recordTestOutcomeTool,
 ];
 
+/**
+ * What the tool definitions cost on every request, before any conversation
+ * exists. A window that cannot hold this truncates every turn regardless of how
+ * small the work is, which no payload-sized check would ever notice.
+ * Schemas tokenize at ~4.4 chars/token on qwen3.6, so this errs slightly high.
+ */
+export function toolSurface(): { toolCount: number; tokens: number } {
+  const chars = ALL_TOOLS.reduce(
+    (sum, t) =>
+      sum + JSON.stringify({ name: t.name, description: t.description, parameters: t.inputSchema }).length,
+    0
+  );
+  return { toolCount: ALL_TOOLS.length, tokens: Math.ceil(chars / 4.4) };
+}
+
 // Tools exempt from gateway guard (they ARE the "context loading" themselves).
 // check_context_budget joins them: it is what you call to find out whether
 // there is room to load context at all, so demanding context first is circular.
@@ -113,7 +128,7 @@ async function dispatch(
   const args = sanitize(rawArgs);
   switch (toolName) {
     case "check_context_budget":
-      return handleCheckContextBudget(args as { planned_chars?: number; intent?: string });
+      return handleCheckContextBudget(args as { planned_chars?: number; intent?: string }, toolSurface());
     case "record_test_outcome":
       return handleRecordTestOutcome(engine, args as { command: string; failed: boolean });
     case "get_phase_state":
