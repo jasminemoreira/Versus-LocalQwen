@@ -438,8 +438,19 @@ Table of modules × lenses (universal + activated conditional) with severities.
 - **Concentration by lens:** Lens with findings across ALL modules → SYSTEMIC failure (e.g.: no parameter has a reference, no module testable in isolation).
 - Document concentration patterns with record_decision().
 
-### Persist the matrix (MANDATORY):
-Write the coverage matrix to \`specs/design/coverage-matrix.md\` as a modules × lenses table with the 🔴🟡🟢 findings in the cells. advance_phase to Phase 3 is BLOCKED until it exists. Displaying it in chat is not enough: Phase 3 works from the file, and a chat message does not survive compaction.
+### PERSIST IT AS A FINDINGS TABLE (MANDATORY):
+Write \`specs/design/coverage-matrix.md\` as one row per finding, not as a grid of severities:
+
+\`\`\`
+| id | module | lens | severity | description |
+|----|--------|------|----------|-------------|
+| P-01 | auth | Security | 🔴 | password reaches the log on failed login |
+| P-02 | store | Assumptions | 🟡 | assumes the schema never changes; duplica: P-05 |
+\`\`\`
+
+Each finding gets its own id. Where two findings overlap, say so with \`duplica: <id>\` rather than merging them — the point of the matrix is telling overlap apart from orthogonality, and a severity grid destroys exactly that. A cell holding 🔴 says a lens found something; it does not say what, so Phase 3 cannot work from it.
+
+advance_phase to Phase 3 is BLOCKED until the file exists AND holds at least three finding rows. The engine checks the shape, not whether a finding is real or a \`duplica\` is honest — that judgement stays yours.
 
 ### Exit Gate (⚠️ MUST DISPLAY gate summary in chat — show total 🔴/🟡/🟢 counts and verdict):
 - 🔴 criticals → Phase 3 resolves them (criticals do NOT block the P2→P3 transition — they define Phase 3's work)
@@ -469,7 +480,7 @@ Integrate all responses into the whole — don't correct module by module in iso
 Trade-offs resolved by the HUMAN OPERATOR (S2: stopping criterion is the user's).
 
 ### Step 0 — Read \`specs/design/coverage-matrix.md\`:
-Work the criticals line by line from that file, not from memory. Phase 2 wrote it precisely so this phase survives a compaction between the two.
+Address the findings **by id**, one at a time, from that file rather than from memory — Phase 2 wrote it precisely so this phase survives a compaction between the two. Record what each id resolved to, and where a finding was accepted as risk rather than fixed, record_decision it against its id. An id you cannot account for is scope you deferred silently (AP10).
 
 ### Purpose: Simplify V(N) → V(N+1), eliminating complexity.
 **CAUTION AP2 (Complexity as false solution):** Each iteration must SIMPLIFY, not complexify.

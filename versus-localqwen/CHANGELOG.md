@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.5.1] - 2026-08-05
+
+Delta from Versus for Claude 0.12.0 (commit `5998fed`), on top of the 0.11.0
+gates already in 0.5.0.
+
+### Changed
+
+- **The coverage matrix is a findings table, and the gate checks its shape.** A
+  modules × lenses grid of severities clears any size floor and cannot be worked
+  from: a cell holding 🔴 says a lens found something, not what. Phase 3 is
+  supposed to address findings one at a time, and a grid gives it nothing to
+  address.
+
+  `specs/design/coverage-matrix.md` must now hold at least three rows in the
+  form `id | module | lens | severity | description`, each finding carrying its
+  own id, with overlap declared as `duplica: <id>` rather than merged away —
+  telling overlap apart from orthogonality is the point of the matrix.
+
+  New `artifactRows` on `ExitCriterionDef` and `countArtifactRows` on the engine
+  express it. Form only: the engine does not judge whether a finding is real or
+  whether a `duplica` is honest.
+
+- Phase 3 guidance now addresses findings **by id**, records what each resolved
+  to, and treats an unaccounted id as silent scope deferral (AP10).
+
+### Notes
+
+Verified against the three scenarios the spec asks for, through the MCP server:
+no file blocks naming the path; a 178-character severity grid clears the size
+floor and blocks naming the finding-id format; a three-id findings table passes.
+
+The middle scenario is the one worth having: the first grid I wrote for it was
+under the 80-character floor, so it blocked with "missing or empty" and would
+have looked like a pass of the structural check without ever reaching it.
+
 ## [0.5.0] - 2026-08-01
 
 Upstream patch from Versus for Claude 0.11.0 (commit `c7e21a4`).

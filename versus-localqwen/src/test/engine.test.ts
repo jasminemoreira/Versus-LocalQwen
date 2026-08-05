@@ -41,6 +41,31 @@ function writeSpecArtifact(tmp: string, rel: string, body = "x".repeat(120)): vo
   fs.writeFileSync(full, body, "utf-8");
 }
 
+/**
+ * The coverage matrix is gated on structure, not just presence: one row per
+ * finding, each with its own id, so overlap can be told from orthogonality.
+ */
+const FINDINGS_TABLE = [
+  "| id | module | lens | severity | description |",
+  "|----|--------|------|----------|-------------|",
+  "| P-01 | auth | Security | 🔴 | password reaches the log on failed login |",
+  "| P-02 | store | Assumptions | 🟡 | assumes the schema never changes |",
+  "| ARQ-3 | api | Architectural | 🟢 | controller and transport are coupled |",
+].join("\n");
+
+/** A grid of severities: same size, same lenses, no finding is identifiable. */
+const SEVERITY_GRID = [
+  "| module | Security | Assumptions | Architectural |",
+  "|--------|----------|-------------|---------------|",
+  "| auth | 🔴 | 🟡 | 🟢 |",
+  "| store | 🟢 | 🔴 | 🟡 |",
+  "| api | 🟡 | 🟢 | 🔴 |",
+].join("\n");
+
+function writeCoverageMatrix(tmp: string, body = FINDINGS_TABLE): void {
+  writeSpecArtifact(tmp, "design/coverage-matrix.md", body);
+}
+
 function cleanTempWorkspace(tmp: string): void {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -254,7 +279,7 @@ test("loop Phase 2↔3 allowed", () => {
 
   // Phase 2 → 3
   for (const c of engine.getExitCriteriaWithDefs(2)) engine.markExitCriterion(2, c.criterion, true);
-  writeSpecArtifact(workspace, "design/coverage-matrix.md");
+  writeCoverageMatrix(workspace);
   const to3 = engine.advancePhase(3);
   assert.strictEqual(to3.ok, true);
 
@@ -836,11 +861,55 @@ test("a trivial artifact does not count as evidence", () => {
   try {
     markAll(engine, 2);
     // A heading alone is the shape of a file written to satisfy a checker.
-    writeSpecArtifact(tmp, "design/coverage-matrix.md", "# Coverage Matrix\n");
+    writeCoverageMatrix(tmp, "# Coverage Matrix\n");
     assert.ok(!engine.advancePhase(3).ok, "80 non-whitespace chars is the floor");
 
-    writeSpecArtifact(tmp, "design/coverage-matrix.md");
+    writeCoverageMatrix(tmp);
     assert.ok(engine.advancePhase(3).ok);
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a severity grid is long enough but not analysable, so it blocks", () => {
+  const { engine, tmp } = engineAt(2);
+  try {
+    markAll(engine, 2);
+    writeCoverageMatrix(tmp, SEVERITY_GRID);
+
+    // The grid clears the size floor — that is the whole point of the structural
+    // gate: a cell holding 🔴 says a lens found something, not what.
+    assert.ok(engine.artifactPresent("design/coverage-matrix.md"));
+    const blocked = engine.advancePhase(3);
+    assert.ok(!blocked.ok, "a grid of severities cannot be worked from");
+    if (!blocked.ok) {
+      assert.ok(
+        blocked.error.missingCriteria.some((m) => m.includes("finding-id format")),
+        "the block must name the shape it wants"
+      );
+    }
+
+    writeCoverageMatrix(tmp);
+    assert.ok(engine.advancePhase(3).ok, "a findings table unblocks it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("countArtifactRows counts findings, not grid rows", () => {
+  const { engine, tmp } = engineAt(2);
+  try {
+    const { getExitCriteriaForPhase } = require("../rules/phases");
+    const def = getExitCriteriaForPhase(2).find((d: any) => d.criterion === "coverage_matrix");
+    const pattern = def.artifactRows.pattern;
+
+    writeCoverageMatrix(tmp);
+    assert.strictEqual(engine.countArtifactRows("design/coverage-matrix.md", pattern), 3);
+
+    writeCoverageMatrix(tmp, SEVERITY_GRID);
+    assert.strictEqual(engine.countArtifactRows("design/coverage-matrix.md", pattern), 0);
+
+    assert.strictEqual(engine.countArtifactRows("design/absent.md", pattern), 0);
   } finally {
     cleanTempWorkspace(tmp);
   }

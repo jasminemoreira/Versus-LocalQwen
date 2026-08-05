@@ -441,6 +441,22 @@ export class StateEngine {
     }
   }
 
+  /**
+   * Lines in the artifact matching `pattern`. Where structure carries the
+   * meaning, existence is not evidence: a severity grid and a findings table are
+   * the same file size and only one can be analysed.
+   */
+  countArtifactRows(relPath: string, pattern: string): number {
+    try {
+      const full = path.join(this.specsPath, relPath);
+      if (!fs.existsSync(full)) return 0;
+      const text = fs.readFileSync(full, "utf-8");
+      return (text.match(new RegExp(pattern, "gm")) || []).length;
+    } catch {
+      return 0;
+    }
+  }
+
   /** True when a passing run was witnessed in this phase (S4). */
   witnessedTestPass(phase: number): boolean {
     const t = this.state?.lastTestOutcome;
@@ -461,6 +477,18 @@ export class StateEngine {
           `[Phase ${phase}] ${def.criterion}: required artifact specs/${def.artifact} is missing or ` +
           `empty. Write the structured artifact to disk — marking the criterion met is not enough; ` +
           `the record must survive the session and be inspectable later.`
+        );
+      } else if (
+        def.artifact &&
+        def.artifactRows &&
+        this.countArtifactRows(def.artifact, def.artifactRows.pattern) < def.artifactRows.count
+      ) {
+        out.push(
+          `[Phase ${phase}] ${def.criterion}: specs/${def.artifact} exists but is not in the ` +
+          `required structured form — fewer than ${def.artifactRows.count} rows match the ` +
+          `finding-id format 'ID | module | lens | severity | …', e.g. ` +
+          `'P-01 | auth | Security | 🔴 | password reaches the log'. A severity-only grid cannot ` +
+          `be analysed: each finding needs its own id so overlap can be told from orthogonality.`
         );
       }
       if (def.verify === "test-pass" && !this.witnessedTestPass(phase)) {

@@ -16,6 +16,13 @@ export interface ExitCriterionDef {
   /** Relative path under specs/ that must exist and be non-trivial to pass. */
   artifact?: string;
   /**
+   * The artifact must hold at least `count` lines matching `pattern`. Used where
+   * the STRUCTURE is the measurement — one id per finding in the matrix — not
+   * merely the file's existence. Form, not content: the engine does not judge
+   * whether a finding is real or whether a `duplicates:` note is honest.
+   */
+  artifactRows?: { pattern: string; count: number };
+  /**
    * Mechanical verification beyond the boolean. "test-pass": a passing run must
    * have been witnessed in this phase (S4).
    */
@@ -107,7 +114,7 @@ export const EXIT_CRITERIA: ExitCriterionDef[] = [
   // Phase 2
   { phase: 2, criterion: "activated_lenses_recorded", description: "Activated conditional lenses recorded via record_decision(category='architecture') BEFORE starting critique — with justification for each non-activated lens. Conditional lenses include: 8 situational (Resilience, UI/UX, Migration, Sustainability, Ethical, Process, Governance, Observability) + 4 Domain Transfer Lenses (Control Engineering, Game Theory, Linguistics/Grammar, Mechanical Engineering). Absence of findings is a valid result — no lens may be skipped.", required: true },
   { phase: 2, criterion: "lenses_applied", description: "All 7 universal lenses + all activated conditional lenses applied to each module (no lens skipped — absence of findings is a valid result)", required: true },
-  { phase: 2, criterion: "coverage_matrix", description: "Coverage matrix modules x lenses displayed in chat (all modules × all activated lenses)", required: true , artifact: "design/coverage-matrix.md"},
+  { phase: 2, criterion: "coverage_matrix", description: "Coverage matrix modules x lenses displayed in chat (all modules × all activated lenses)", required: true , artifact: "design/coverage-matrix.md", artifactRows: { pattern: "\\|\\s*[A-Za-z]{1,4}-\\d+\\s*\\|", count: 3 }},
   { phase: 2, criterion: "criticals_identified", description: "Critical findings identified and classified", required: true },
   { phase: 2, criterion: "concentration_analyzed", description: "Concentration analysis performed (by module and by lens)", required: true },
 
