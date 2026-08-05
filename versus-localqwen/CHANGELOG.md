@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.6.0] - 2026-08-05
+
+Standalone patch `APLICAR-ARQUITETURA-TABELA-MODULOS-NOS-OUTROS-BUILDS.md`, from
+Versus for Claude 0.12.2. Its Arquivo 2 (the engine machinery) was already in
+place from the matrix patch, so only 1, 3 and 4 applied.
+
+### Changed
+
+- **`specs/technical/architecture.md` must contain a module table.** Prose
+  clears any size floor and leaves the module list unreadable to anything but a
+  human, so `advance_phase` from Phase 1 now requires at least one row matching
+  `M-\d+`:
+
+  ```
+  | id   | module      | responsibility        | interface                      | depends-on |
+  | M-01 | rate-limiter| enforce per-key quota | allow(key) -> {ok, retryAfter} | store      |
+  ```
+
+  The id exists only to make the row recognisable. **The stable key across
+  phases is the module name in column 2** — Phase 2's matrix and Phase 5 must
+  reuse those names, since `rate-limiter` here and `quota` there is two artifacts
+  that cannot be joined.
+
+- **The block message now comes from the criterion, not from the code.** Two
+  criteria share `artifactRows` with different tokens, so the previously
+  hardcoded message would have told someone missing a *module table* to write a
+  *findings row*. `artifactRows` gained an `example` field and the message quotes
+  it. A test asserts each criterion produces its own example and not the other's.
+
+### Notes
+
+The patch names a limit worth repeating rather than burying: the gate checks that
+a module table exists, **not** that Phase 2 and Phase 5 actually reused the
+names. Drift from `rate-limiter` to `quota` becomes *detectable* — both artifacts
+are machine-readable and diffable — but is not *prevented*. No gate cross-checks
+`matrix.module ∈ architecture.modules`. That is a further step, not this one.
+
 ## [0.5.3] - 2026-08-05
 
 Third revision of the same standalone patch

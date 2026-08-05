@@ -485,11 +485,10 @@ export class StateEngine {
       ) {
         out.push(
           `[Phase ${phase}] ${def.criterion}: specs/${def.artifact} exists but is not in the ` +
-          `required findings-table form — needs at least ${def.artifactRows.count} finding ` +
-          `row(s) carrying an id, e.g. 'P-01 | auth | Security | 🔴 | password reaches the log'. ` +
-          `A severity-only grid cannot be analysed: each finding needs its own id so overlap can ` +
-          `be told from orthogonality. The id must contain a hyphen and the row must keep its ` +
-          `pipes — 'P01' and a row without '|' do not count.`
+          `required structured form — needs at least ${def.artifactRows.count} table row(s) ` +
+          `carrying an id, e.g. '${def.artifactRows.example}'. Prose and a grid without ids both ` +
+          `read as zero rows: nothing downstream can address what it cannot name. The id needs a ` +
+          `hyphen and the row needs its pipes — 'M01' and a line without '|' do not count.`
         );
       }
       if (def.verify === "test-pass" && !this.witnessedTestPass(phase)) {

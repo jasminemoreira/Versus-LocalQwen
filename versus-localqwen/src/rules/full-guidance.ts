@@ -374,7 +374,17 @@ After user confirms architecture, call update_project_spec() with:
 - stack: approved technologies (e.g., ["TypeScript", "React 18", "FastAPI", "PostgreSQL"])
 - outOfScope: items the system deliberately will NOT do (mirrors negative scope from question 4)
 - patterns: architectural patterns selected (e.g., ["Clean Architecture", "Repository pattern"])
-ALSO write the architecture document to \`specs/technical/architecture.md\`, keyed by module: responsibility, interface signatures, dependencies, assumptions. advance_phase to Phase 2 is BLOCKED until that file exists — the engine checks it is present and non-trivial, not that it is good.
+ALSO write the architecture document to \`specs/technical/architecture.md\`. It MUST contain a **module table**, so the canonical module list is machine-readable rather than buried in prose:
+
+\`\`\`
+| id   | module      | responsibility            | interface                     | depends-on |
+|------|-------------|---------------------------|-------------------------------|------------|
+| M-01 | rate-limiter| enforce per-key quota     | allow(key) -> {ok, retryAfter}| store      |
+\`\`\`
+
+The \`M-\\d+\` id exists only to make the row recognisable to the gate. **The stable key across phases is the module name in column 2.** Phase 2's coverage matrix and Phase 5's implementation must use those same names — a module called \`rate-limiter\` here and \`quota\` there is two artifacts that cannot be joined.
+
+Assumptions and anything the table cannot hold go in prose below it. advance_phase to Phase 2 is BLOCKED until the file exists and holds at least one module row. The engine checks the shape, not whether the decomposition is good — that judgement stays yours.
 - constraints: hard constraints that must survive model switches (e.g., ["Copilot-only", "no external auth providers"])
 This structured context is injected before every message in all phases — it is the primary mechanism for enforcing P1 decisions across sessions.`;
 

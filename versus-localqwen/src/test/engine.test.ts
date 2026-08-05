@@ -66,6 +66,27 @@ function writeCoverageMatrix(tmp: string, body = FINDINGS_TABLE): void {
   writeSpecArtifact(tmp, "design/coverage-matrix.md", body);
 }
 
+/**
+ * The architecture doc is gated the same way, on its own token: `M-\d+`. The
+ * module name in column 2 is the key Phase 2 and Phase 5 are meant to reuse.
+ */
+const MODULE_TABLE = [
+  "| id | module | responsibility | interface | depends-on |",
+  "|------|-------------|----------------|-----------|------------|",
+  "| M-01 | rate-limiter | enforce per-key quota | allow(key) -> {ok, retryAfter} | store |",
+  "| M-02 | store | persist counters | get(key) / set(key, v) | — |",
+].join("\n");
+
+/** The same decomposition as prose: readable by a person, not by a machine. */
+const PROSE_ARCHITECTURE =
+  "The rate limiter enforces a per-key quota by asking the store for the current " +
+  "counter and comparing it against the configured ceiling. The store persists " +
+  "counters and exposes get and set. Neither module knows about transport.";
+
+function writeArchitectureDoc(tmp: string, body = MODULE_TABLE): void {
+  writeSpecArtifact(tmp, "technical/architecture.md", body);
+}
+
 function cleanTempWorkspace(tmp: string): void {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -272,7 +293,7 @@ test("loop Phase 2↔3 allowed", () => {
   for (const c of engine.getExitCriteriaWithDefs(0)) engine.markExitCriterion(0, c.criterion, true);
   engine.advancePhase(1);
   for (const c of engine.getExitCriteriaWithDefs(1)) engine.markExitCriterion(1, c.criterion, true);
-  writeSpecArtifact(workspace, "technical/architecture.md");
+  writeArchitectureDoc(workspace);
   engine.advancePhase(2);
 
   assert.strictEqual(engine.getPhaseState()!.currentPhase, 2);
@@ -849,8 +870,33 @@ test("a marked criterion does not advance without its artifact on disk", () => {
       );
     }
 
-    writeSpecArtifact(tmp, "technical/architecture.md");
+    writeArchitectureDoc(tmp);
     assert.ok(engine.advancePhase(2).ok, "the artifact must unblock it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a prose architecture blocks P1 to P2, and the message names the module row", () => {
+  const { engine, tmp } = engineAt(1);
+  try {
+    markAll(engine, 1);
+    writeArchitectureDoc(tmp, PROSE_ARCHITECTURE);
+
+    // Prose clears the size floor; it is the structure that is missing.
+    assert.ok(engine.artifactPresent("technical/architecture.md"));
+    const blocked = engine.advancePhase(2);
+    assert.ok(!blocked.ok, "a prose decomposition cannot be machine-read");
+    if (!blocked.ok) {
+      const msg = blocked.error.missingCriteria.join(" ");
+      // The example has to come from the criterion: two artifacts share this
+      // mechanism, and a shared message would ask for the wrong shape.
+      assert.ok(msg.includes("M-01 | rate-limiter"), `wrong example in: ${msg}`);
+      assert.ok(!msg.includes("P-01 | auth"), "must not ask for a findings row here");
+    }
+
+    writeArchitectureDoc(tmp);
+    assert.ok(engine.advancePhase(2).ok, "a module table unblocks it");
   } finally {
     cleanTempWorkspace(tmp);
   }
@@ -894,7 +940,11 @@ test("a severity grid is long enough but not analysable, so it blocks", () => {
     assert.ok(!blocked.ok, "a grid of severities cannot be worked from");
     if (!blocked.ok) {
       assert.ok(
-        blocked.error.missingCriteria.some((m) => m.includes("findings-table form")),
+        // The example is what tells the model which shape is wanted, and it
+        // must be the matrix one here — not the module row.
+        blocked.error.missingCriteria.some(
+          (m) => m.includes("P-01 | auth") && !m.includes("M-01 | rate-limiter")
+        ),
         "the block must name the shape it wants"
       );
     }
