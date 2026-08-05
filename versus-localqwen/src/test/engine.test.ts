@@ -871,6 +871,16 @@ test("a trivial artifact does not count as evidence", () => {
   }
 });
 
+test("the row floor stays at the minimum that rejects the wrong shape", () => {
+  // count is 1, not 3, on purpose: the gate has to reject an id-less grid (zero
+  // finding rows) without demanding a number of findings. In a study whose
+  // metric is finding count, a higher floor would be the tool manufacturing its
+  // own result.
+  const { getExitCriteriaForPhase } = require("../rules/phases");
+  const def = getExitCriteriaForPhase(2).find((d: any) => d.criterion === "coverage_matrix");
+  assert.strictEqual(def.artifactRows.count, 1);
+});
+
 test("a severity grid is long enough but not analysable, so it blocks", () => {
   const { engine, tmp } = engineAt(2);
   try {
@@ -884,7 +894,7 @@ test("a severity grid is long enough but not analysable, so it blocks", () => {
     assert.ok(!blocked.ok, "a grid of severities cannot be worked from");
     if (!blocked.ok) {
       assert.ok(
-        blocked.error.missingCriteria.some((m) => m.includes("finding-id format")),
+        blocked.error.missingCriteria.some((m) => m.includes("findings-table form")),
         "the block must name the shape it wants"
       );
     }

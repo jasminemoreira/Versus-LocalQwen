@@ -20,6 +20,11 @@ export interface ExitCriterionDef {
    * the STRUCTURE is the measurement — one id per finding in the matrix — not
    * merely the file's existence. Form, not content: the engine does not judge
    * whether a finding is real or whether a `duplicates:` note is honest.
+   *
+   * Keep `count` at the minimum that rejects the wrong shape, which for the
+   * matrix is 1: an id-less severity grid yields zero finding rows. A higher
+   * floor would demand a number of findings, and in a study whose metric is
+   * finding count that is the tool manufacturing its own result.
    */
   artifactRows?: { pattern: string; count: number };
   /**
@@ -114,7 +119,7 @@ export const EXIT_CRITERIA: ExitCriterionDef[] = [
   // Phase 2
   { phase: 2, criterion: "activated_lenses_recorded", description: "Activated conditional lenses recorded via record_decision(category='architecture') BEFORE starting critique — with justification for each non-activated lens. Conditional lenses include: 8 situational (Resilience, UI/UX, Migration, Sustainability, Ethical, Process, Governance, Observability) + 4 Domain Transfer Lenses (Control Engineering, Game Theory, Linguistics/Grammar, Mechanical Engineering). Absence of findings is a valid result — no lens may be skipped.", required: true },
   { phase: 2, criterion: "lenses_applied", description: "All 7 universal lenses + all activated conditional lenses applied to each module (no lens skipped — absence of findings is a valid result)", required: true },
-  { phase: 2, criterion: "coverage_matrix", description: "Coverage findings table written to specs/design/coverage-matrix.md — ONE ROW PER FINDING (id | module | lens | severity | description), each with a unique in-project id and 'duplica: <id>' when it is the same defect another lens found", required: true , artifact: "design/coverage-matrix.md", artifactRows: { pattern: "\\|\\s*[A-Za-z]{1,4}-\\d+\\s*\\|", count: 3 }},
+  { phase: 2, criterion: "coverage_matrix", description: "Coverage findings table written to specs/design/coverage-matrix.md — ONE ROW PER FINDING (id | module | lens | severity | description), each with a unique in-project id and 'duplica: <id>' when it is the same defect another lens found", required: true , artifact: "design/coverage-matrix.md", artifactRows: { pattern: "\\|\\s*[A-Za-z]{1,4}-\\d+\\s*\\|", count: 1 }},
   { phase: 2, criterion: "criticals_identified", description: "Critical findings identified and classified", required: true },
   { phase: 2, criterion: "concentration_analyzed", description: "Concentration analysis performed (by module and by lens)", required: true },
 

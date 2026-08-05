@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.5.3] - 2026-08-05
+
+Third revision of the same standalone patch
+(`APLICAR-MATRIZ-ACHADOS-NOS-OUTROS-BUILDS.md`), which changed again after 0.5.2.
+
+### Changed
+
+- **The row floor drops from 3 to 1.** The gate only has to reject the shape that
+  cannot be analysed — an id-less severity grid, which yields zero finding rows.
+  Demanding three findings would make the tool require a quantity of findings,
+  and in a study whose metric *is* finding count that is the instrument
+  manufacturing its own result. Verified: the grid still blocks at `count: 1`,
+  and a single finding row passes.
+
+- **The `lens` column takes the canonical English lens name**, spelled as the
+  guidance spells it — `Security`, not "Segurança" or "SEG". It is the join key:
+  matrices from different projects only aggregate if every one writes the lens
+  the same way.
+
+- **Zero findings is stated as a red flag, not a pass.** Twelve lenses across
+  every module producing nothing is AP1 — validation theater wearing the shape of
+  success. The guidance now says to report it and re-run the lenses in generation
+  mode rather than record an empty matrix.
+
+- The block message names the two mistakes that actually cause "why is it still
+  blocking?": an id without a hyphen (`P01`), and a row without pipes.
+
+### Notes
+
+Item 3 of the patch — replacing the Phase 2 offer of "zero findings → advance OR
+skip to Phase 4" — does not apply here. That text is from the Claude line; this
+build came from the Copilot line, whose exit gate always routed to Phase 3 and
+explains that zero 🔴 is the criterion to *leave* the 2↔3 loop, not to skip it.
+`isValidTransition` rejects 2→4 outright. Only the red-flag sentence was missing,
+and it was added.
+
 ## [0.5.2] - 2026-08-05
 
 ### Fixed

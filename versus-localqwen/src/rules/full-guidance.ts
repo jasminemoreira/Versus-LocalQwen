@@ -450,12 +450,17 @@ Write \`specs/design/coverage-matrix.md\` as one row per finding, not as a grid 
 
 Each finding gets its own id. Where two findings overlap, say so with \`duplica: <id>\` rather than merging them — the point of the matrix is telling overlap apart from orthogonality, and a severity grid destroys exactly that. A cell holding 🔴 says a lens found something; it does not say what, so Phase 3 cannot work from it.
 
+**The \`lens\` column takes the canonical lens name, in English, exactly as this guidance spells it** — \`Security\`, not "Segurança" or "SEG". The name is the join key: matrices from different projects only aggregate if the lens is written the same way in all of them.
+
+The id needs a hyphen and the row needs its pipes: \`P-01\` counts, \`P01\` does not, and a line without \`|\` is not a row.
+
 advance_phase to Phase 3 is BLOCKED until the file exists AND holds at least three finding rows. The engine checks the shape, not whether a finding is real or a \`duplica\` is honest — that judgement stays yours.
 
 ### Exit Gate (⚠️ MUST DISPLAY gate summary in chat — show total 🔴/🟡/🟢 counts and verdict):
 - 🔴 criticals → Phase 3 resolves them (criticals do NOT block the P2→P3 transition — they define Phase 3's work)
 - Each 🟡 requires EXPLICIT decision: treat OR accept risk WITH DOCUMENTED justification (record_decision)
 - 🟢 can be deferred to v2.0 (record in record_decision)
+- **Zero findings is a red flag, not a pass.** A critique that attacked twelve lenses across every module and produced nothing was almost certainly not adversarial — that is AP1, validation theater, wearing the shape of success. Say so to the user and re-run the lenses in generation mode ("how does this fail?"), rather than recording an empty matrix.
 
 ### AFTER GATE — mandatory next action (do NOT stop after displaying the gate summary):
 After displaying the exit gate summary, call advance_phase(target_phase=3) immediately.
