@@ -374,6 +374,7 @@ After user confirms architecture, call update_project_spec() with:
 - stack: approved technologies (e.g., ["TypeScript", "React 18", "FastAPI", "PostgreSQL"])
 - outOfScope: items the system deliberately will NOT do (mirrors negative scope from question 4)
 - patterns: architectural patterns selected (e.g., ["Clean Architecture", "Repository pattern"])
+ALSO write the architecture document to \`specs/technical/architecture.md\`, keyed by module: responsibility, interface signatures, dependencies, assumptions. advance_phase to Phase 2 is BLOCKED until that file exists — the engine checks it is present and non-trivial, not that it is good.
 - constraints: hard constraints that must survive model switches (e.g., ["Copilot-only", "no external auth providers"])
 This structured context is injected before every message in all phases — it is the primary mechanism for enforcing P1 decisions across sessions.`;
 
@@ -437,6 +438,9 @@ Table of modules × lenses (universal + activated conditional) with severities.
 - **Concentration by lens:** Lens with findings across ALL modules → SYSTEMIC failure (e.g.: no parameter has a reference, no module testable in isolation).
 - Document concentration patterns with record_decision().
 
+### Persist the matrix (MANDATORY):
+Write the coverage matrix to \`specs/design/coverage-matrix.md\` as a modules × lenses table with the 🔴🟡🟢 findings in the cells. advance_phase to Phase 3 is BLOCKED until it exists. Displaying it in chat is not enough: Phase 3 works from the file, and a chat message does not survive compaction.
+
 ### Exit Gate (⚠️ MUST DISPLAY gate summary in chat — show total 🔴/🟡/🟢 counts and verdict):
 - 🔴 criticals → Phase 3 resolves them (criticals do NOT block the P2→P3 transition — they define Phase 3's work)
 - Each 🟡 requires EXPLICIT decision: treat OR accept risk WITH DOCUMENTED justification (record_decision)
@@ -463,6 +467,9 @@ Phase 2 attacked with MULTIPLE lenses. Phase 3 responds with UNIFIED VISION.
 Individually correct corrections may be systemically contradictory.
 Integrate all responses into the whole — don't correct module by module in isolation.
 Trade-offs resolved by the HUMAN OPERATOR (S2: stopping criterion is the user's).
+
+### Step 0 — Read \`specs/design/coverage-matrix.md\`:
+Work the criticals line by line from that file, not from memory. Phase 2 wrote it precisely so this phase survives a compaction between the two.
 
 ### Purpose: Simplify V(N) → V(N+1), eliminating complexity.
 **CAUTION AP2 (Complexity as false solution):** Each iteration must SIMPLIFY, not complexify.
@@ -565,6 +572,7 @@ The methodology is context-safe: all decisions persist in state.json, all specs 
 In a CONTINUOUS session (P0→P5 without interruption), the conversation context already holds all decisions — proceed directly to modules.
 
 ### BEFORE each module, consult:
+- \`specs/technical/architecture.md\` — the module's responsibility, interfaces and assumptions, as fixed in Phase 1. Read it rather than reconstructing the design from the conversation.
 - specs/technical (algorithm, formulas, params)
 - specs/examples (reference code)
 - specs/references (original paper)
@@ -786,6 +794,9 @@ The content MUST use this structure:
 After each fix, record a testing decision noting: what was fixed, what still needs retesting.
 This ensures the NEXT session knows exactly what changed since the last test round.
 
+### tests_passing is witnessed, not asserted:
+advance_phase to Phase 7 is BLOCKED until a passing run is recorded in THIS phase via \`record_test_outcome(command, failed=false)\`. This host has no hook watching your shell, so a run you do not report is a run the engine did not see. S4 — never assume tests passed, execute and verify.
+
 ### Next Step (MANDATORY — do NOT stop after manual testing is complete):
 When all tests pass and manual testing is done: call advance_phase(target_phase=7) then get_phase_guidance() to load Phase 7 post-review instructions.`;
 
@@ -809,6 +820,9 @@ Capture 3-5 lessons about THIS project (not about the methodology):
 - Assumptions from P0/P1 that turned out wrong
 
 Deposit lessons in specs/technical or specs/references — they become valuable input for v2 via start_new_cycle.
+
+### Persist the lessons (MANDATORY):
+Write them to \`specs/references/lessons.md\`: domain, stack, patterns, wrong assumptions, and what the process itself cost. start_new_cycle is BLOCKED until the file exists — the next cycle inherits these lessons, and a conversation about to be replaced is not where they can live.
 
 ### Meta-iteration v1.0 → v2.0 (⚠️ MUST DISPLAY offer in chat):
 After completing all Phase 7 steps, you MUST offer the user the option to start a new development cycle:

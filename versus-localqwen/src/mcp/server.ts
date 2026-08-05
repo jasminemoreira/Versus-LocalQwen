@@ -37,7 +37,7 @@ async function main() {
   const server = new Server(
     {
       name: "versus-localqwen",
-      version: "0.4.2",
+      version: "0.5.0",
     },
     {
       capabilities: {
@@ -53,6 +53,12 @@ async function main() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     try {
+      // Re-read before every call. The state file is written by other
+      // processes — the extension host on init, and this server's own earlier
+      // instances in another window — and the engine saves after each mutation,
+      // so disk is authoritative. Without this the evidence gates would judge a
+      // snapshot taken at startup.
+      engine.load();
       const result = await handleToolCall(name, (args ?? {}) as Record<string, unknown>, engine);
       return {
         content: [{ type: "text" as const, text: result }],

@@ -2,7 +2,7 @@
   "name": "versus-localqwen",
   "displayName": "Versus for Local Qwen",
   "description": "IACDM orchestrator for local models served by Ollama in VS Code Agent Mode. Adds a context-budget guard for architectures without KV cache shifting, where overflow kills generation silently.",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "publisher": "JasmineMoreira",
   "author": "Jasmine Moreira",
   "license": "MIT",

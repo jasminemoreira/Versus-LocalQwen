@@ -34,6 +34,13 @@ function createTempWorkspace(): string {
   return tmp;
 }
 
+/** Phases that promise an artifact only advance once it exists on disk. */
+function writeSpecArtifact(tmp: string, rel: string, body = "x".repeat(120)): void {
+  const full = path.join(tmp, "specs", rel);
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  fs.writeFileSync(full, body, "utf-8");
+}
+
 function cleanTempWorkspace(tmp: string): void {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -240,12 +247,14 @@ test("loop Phase 2↔3 allowed", () => {
   for (const c of engine.getExitCriteriaWithDefs(0)) engine.markExitCriterion(0, c.criterion, true);
   engine.advancePhase(1);
   for (const c of engine.getExitCriteriaWithDefs(1)) engine.markExitCriterion(1, c.criterion, true);
+  writeSpecArtifact(workspace, "technical/architecture.md");
   engine.advancePhase(2);
 
   assert.strictEqual(engine.getPhaseState()!.currentPhase, 2);
 
   // Phase 2 → 3
   for (const c of engine.getExitCriteriaWithDefs(2)) engine.markExitCriterion(2, c.criterion, true);
+  writeSpecArtifact(workspace, "design/coverage-matrix.md");
   const to3 = engine.advancePhase(3);
   assert.strictEqual(to3.ok, true);
 
@@ -780,6 +789,112 @@ test("a CommonJS bundle dies under a type:module project without the pin", () =>
     assert.ok(out.includes('"serverInfo"'), "handshake must succeed once CommonJS is pinned");
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+console.log("\n=== Evidence Gate Tests ===\n");
+
+function markAll(engine: StateEngine, phase: number): void {
+  const { getExitCriteriaForPhase } = require("../rules/phases");
+  for (const def of getExitCriteriaForPhase(phase)) {
+    engine.markExitCriterion(phase, def.criterion, true, "test");
+  }
+}
+
+function engineAt(phase: number): { engine: StateEngine; tmp: string } {
+  const tmp = createTempWorkspace();
+  const engine = new StateEngine(tmp);
+  engine.initProject("gates", "evidence");
+  const st = engine.getPhaseState()!;
+  (st as any).currentPhase = phase;
+  engine.recordDecision(phase, "scope", "phase forced for test");
+  return { engine, tmp };
+}
+
+test("a marked criterion does not advance without its artifact on disk", () => {
+  const { engine, tmp } = engineAt(1);
+  try {
+    markAll(engine, 1);
+    const blocked = engine.advancePhase(2);
+    assert.ok(!blocked.ok, "every criterion is met, but the artifact is absent");
+    if (!blocked.ok) {
+      assert.ok(
+        blocked.error.missingCriteria.some((m) => m.includes("specs/technical/architecture.md")),
+        "the block must name the missing file, not just refuse"
+      );
+    }
+
+    writeSpecArtifact(tmp, "technical/architecture.md");
+    assert.ok(engine.advancePhase(2).ok, "the artifact must unblock it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a trivial artifact does not count as evidence", () => {
+  const { engine, tmp } = engineAt(2);
+  try {
+    markAll(engine, 2);
+    // A heading alone is the shape of a file written to satisfy a checker.
+    writeSpecArtifact(tmp, "design/coverage-matrix.md", "# Coverage Matrix\n");
+    assert.ok(!engine.advancePhase(3).ok, "80 non-whitespace chars is the floor");
+
+    writeSpecArtifact(tmp, "design/coverage-matrix.md");
+    assert.ok(engine.advancePhase(3).ok);
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("tests_passing needs a pass witnessed in this phase", () => {
+  const { engine, tmp } = engineAt(6);
+  try {
+    markAll(engine, 6);
+
+    const noRun = engine.advancePhase(7);
+    assert.ok(!noRun.ok, "marking it met is not evidence");
+    if (!noRun.ok) {
+      assert.ok(noRun.error.missingCriteria.some((m) => m.includes("record_test_outcome")),
+        "the block must name the escape, since no hook will report for the model");
+    }
+
+    // A failing run is a witnessed run, but not a passing one.
+    engine.recordTestOutcome("pytest", true);
+    assert.ok(!engine.advancePhase(7).ok, "a failure must not satisfy the gate");
+
+    engine.recordTestOutcome("pytest", false);
+    assert.ok(engine.advancePhase(7).ok, "a witnessed pass unblocks it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a pass witnessed in an earlier phase does not carry forward", () => {
+  const { engine, tmp } = engineAt(5);
+  try {
+    engine.recordTestOutcome("pytest", false);
+    const st = engine.getPhaseState()!;
+    (st as any).currentPhase = 6;
+    engine.recordDecision(6, "scope", "moved on");
+    markAll(engine, 6);
+    assert.ok(!engine.advancePhase(7).ok, "the pass belonged to Phase 5");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("start_new_cycle requires the lessons file", () => {
+  const { engine, tmp } = engineAt(7);
+  try {
+    markAll(engine, 7);
+    const blocked = engine.startNewCycle();
+    assert.ok(!blocked.ok);
+    if (!blocked.ok) assert.ok(String(blocked.error).includes("specs/references/lessons.md"));
+
+    writeSpecArtifact(tmp, "references/lessons.md");
+    assert.ok(engine.startNewCycle().ok);
+  } finally {
+    cleanTempWorkspace(tmp);
   }
 });
 

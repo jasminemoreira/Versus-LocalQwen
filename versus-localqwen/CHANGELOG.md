@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.5.0] - 2026-08-01
+
+Upstream patch from Versus for Claude 0.11.0 (commit `c7e21a4`).
+
+### Added
+
+- **Exit gates require persisted evidence, not a boolean.** Marking a criterion
+  met records a claim; four criteria now also require the artifact that claim
+  refers to to exist on disk before the phase can advance:
+
+  | Phase | Criterion | Evidence |
+  |---|---|---|
+  | 1 | `architecture_doc` | `specs/technical/architecture.md` |
+  | 2 | `coverage_matrix` | `specs/design/coverage-matrix.md` |
+  | 6 | `tests_passing` | a passing run witnessed in this phase |
+  | 7 | `lessons_documented` | `specs/references/lessons.md` |
+
+  The check is liveness, not quality: the file must exist and hold at least 80
+  non-whitespace characters, which rejects an empty file or a lone heading. The
+  guidance says so plainly rather than implying the engine reviews content. A
+  blocked transition names the missing path, since a gate that refuses without
+  saying what is missing is the dead end the `safeguardViolations` fix addressed.
+
+  `start_new_cycle` is gated the same way on the lessons file: the next cycle
+  inherits them, and a conversation about to be replaced is not where they live.
+
+- **The MCP server re-reads state before every tool call.** It used to load once
+  at startup, so a state written by another process — the extension host on
+  init, or another window's server — was invisible for the rest of the session.
+  The engine saves after each mutation, so disk is authoritative.
+
+### Notes
+
+The upstream spec tells this build to skip the `verify: "test-pass"` gate,
+reasoning that without a `test-outcome` hook nothing writes `lastTestOutcome`
+and the gate would block forever. That caveat predates 0.3.0: `record_test_outcome`
+exists here as an MCP tool and feeds the same field, so the gate is applied.
+
+The difference is worth naming. A hook observes a run whether or not the model
+cooperates; a tool depends on the model calling it. So the block message names
+`record_test_outcome(command, failed=false)` explicitly — without an escape the
+model can actually reach, this gate would be a trap rather than a check.
+
 ## [0.4.2] - 2026-08-01
 
 ### Fixed

@@ -238,12 +238,14 @@ export class StateEngine {
       }
     }
 
-    if (!validation.valid) {
+    const artifactMissing = this.missingEvidence(from);
+
+    if (!validation.valid || artifactMissing.length > 0) {
       return {
         ok: false,
         error: {
           message: `Cannot advance from Phase ${from} to Phase ${targetPhase}.`,
-          missingCriteria: validation.missingCriteria,
+          missingCriteria: [...validation.missingCriteria, ...artifactMissing],
           specsWarnings,
           // A violated safeguard vetoes the transition on its own. Dropping it
           // here left the caller with an empty reason and no way to act.
@@ -420,6 +422,59 @@ export class StateEngine {
     return status;
   }
 
+
+  /**
+   * Whether the artifact a criterion promises actually exists on disk.
+   *
+   * Marking a criterion met records a claim; this checks the record survived
+   * the session and can be inspected later. The 80-character floor rejects an
+   * empty file or a lone heading — it is a liveness check, not a quality one,
+   * and the guidance says so rather than implying the engine reviews content.
+   */
+  artifactPresent(relPath: string): boolean {
+    try {
+      const full = path.join(this.specsPath, relPath);
+      if (!fs.existsSync(full)) return false;
+      return fs.readFileSync(full, "utf-8").replace(/\s/g, "").length >= 80;
+    } catch {
+      return false;
+    }
+  }
+
+  /** True when a passing run was witnessed in this phase (S4). */
+  witnessedTestPass(phase: number): boolean {
+    const t = this.state?.lastTestOutcome;
+    return !!t && t.outcome === "pass" && t.phase === phase;
+  }
+
+  /**
+   * Evidence a phase owes beyond its booleans, as messages rather than a flag:
+   * a gate that blocks without naming what is missing is a dead end, which is
+   * exactly the failure the safeguardViolations fix addressed.
+   */
+  private missingEvidence(phase: number): string[] {
+    const out: string[] = [];
+    for (const def of getExitCriteriaForPhase(phase)) {
+      if (!def.required) continue;
+      if (def.artifact && !this.artifactPresent(def.artifact)) {
+        out.push(
+          `[Phase ${phase}] ${def.criterion}: required artifact specs/${def.artifact} is missing or ` +
+          `empty. Write the structured artifact to disk — marking the criterion met is not enough; ` +
+          `the record must survive the session and be inspectable later.`
+        );
+      }
+      if (def.verify === "test-pass" && !this.witnessedTestPass(phase)) {
+        out.push(
+          `[Phase ${phase}] ${def.criterion}: no passing test run was witnessed in this phase. ` +
+          `Run the suite and report it with record_test_outcome(command, failed=false) — this host ` +
+          `has no hook watching your shell, so an unreported run is an unwitnessed one. S4: never ` +
+          `assume tests passed, execute and verify. Marking the criterion met is not enough.`
+        );
+      }
+    }
+    return out;
+  }
+
   // --- Loop Counter ---
 
   /**
@@ -433,6 +488,14 @@ export class StateEngine {
    */
   recordTestOutcome(command: string, failed: boolean): { count: number } {
     if (!this.state) return { count: 0 };
+
+    // Witness for the tests_passing gate. Stamped before the branch, since the
+    // pass path returns early through resetLoopCounter.
+    this.state.lastTestOutcome = {
+      outcome: failed ? "fail" : "pass",
+      phase: this.state.currentPhase,
+      at: new Date().toISOString(),
+    };
 
     if (!failed) {
       this.resetLoopCounter();
@@ -544,6 +607,13 @@ export class StateEngine {
     const unmet = p7Criteria.filter((c) => !c.met);
     if (unmet.length > 0) {
       return { ok: false, error: `Phase 7 exit criteria not met: ${unmet.map((c) => c.criterion).join(", ")}. Complete Post-Review before starting new cycle.` };
+    }
+
+    // A new cycle inherits the previous one's lessons, so they must exist on
+    // disk rather than only in a conversation that is about to be replaced.
+    const missing = this.missingEvidence(7);
+    if (missing.length > 0) {
+      return { ok: false, error: missing.join(" ") };
     }
 
     // Count completed cycles from history (how many times we've reached phase 7)
