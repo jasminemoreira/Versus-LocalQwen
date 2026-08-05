@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.6.1] - 2026-08-05
+
+Standalone patch `APLICAR-FIX-EXEMPLO-POR-ARTEFATO-NOS-OUTROS-BUILDS.md`, from
+Versus for Claude 0.12.3.
+
+### Changed
+
+- **Converged the gate message and the row examples with upstream.** The bug this
+  patch fixes — one hardcoded example serving every `artifactRows` criterion, so a
+  missing *module table* was answered with a *findings row* — was already fixed
+  here in 0.6.0, found independently while applying the architecture patch. The
+  spec credits the Kimi build with finding the same thing during its port.
+
+  Since the fix was already in place, this release converges the wording and the
+  two example strings on upstream's, so the four builds say the same thing.
+
+### Notes
+
+One deliberate divergence: `artifactRows.example` stays **required** here, where
+upstream makes it optional. An omitted example is exactly how the bug arose, and
+an optional field lets a future criterion add `artifactRows` and silently produce
+a message with no example at all. The compiler catching it costs nothing; noticing
+it in a block message months later costs a session.
+
+Verified in both directions, which is what the patch asks for: a prose
+`architecture.md` blocks with `M-01 | rate-limiter` and never `P-01 | auth`, and
+an id-less grid blocks with `P-01 | auth` and never `M-01`.
+
 ## [0.6.0] - 2026-08-05
 
 Standalone patch `APLICAR-ARQUITETURA-TABELA-MODULOS-NOS-OUTROS-BUILDS.md`, from
