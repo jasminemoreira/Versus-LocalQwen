@@ -462,6 +462,8 @@ Each finding gets its own id. Where two findings overlap, say so with \`duplica:
 
 **The \`lens\` column takes the canonical lens name, in English, exactly as this guidance spells it** — \`Security\`, not "Segurança" or "SEG". The name is the join key: matrices from different projects only aggregate if the lens is written the same way in all of them.
 
+Use a consistent id prefix per lens within the project — \`P-\` for Security findings, \`A-\` for Assumptions, and so on — so an id alone says which lens produced it. **The prefix \`M-\` is RESERVED for modules (Phase 1's architecture table) — never use it for a finding; the Mechanical Engineering lens uses \`MEC-\`, not \`M-\`.** A finding carrying \`M-\` would be indistinguishable from a module row, and the gate discards it from the count for exactly that reason.
+
 The id needs a hyphen and the row needs its pipes: \`P-01\` counts, \`P01\` does not, and a line without \`|\` is not a row.
 
 advance_phase to Phase 3 is BLOCKED until the file exists AND holds at least three finding rows. The engine checks the shape, not whether a finding is real or a \`duplica\` is honest — that judgement stays yours.

@@ -53,6 +53,13 @@ const FINDINGS_TABLE = [
   "| ARQ-3 | api | Architectural | 🟢 | controller and transport are coupled |",
 ].join("\n");
 
+/** Mechanical Engineering is a real lens; its prefix must survive the lookahead. */
+const MECHANICAL_FINDING = [
+  "| id | module | lens | severity | description |",
+  "|----|--------|------|----------|-------------|",
+  "| MEC-01 | gearbox | Mechanical Engineering | 🔴 | no tolerance for shaft play |",
+].join("\n");
+
 /** A grid of severities: same size, same lenses, no finding is identifiable. */
 const SEVERITY_GRID = [
   "| module | Security | Assumptions | Architectural |",
@@ -86,6 +93,13 @@ const PROSE_ARCHITECTURE =
 function writeArchitectureDoc(tmp: string, body = MODULE_TABLE): void {
   writeSpecArtifact(tmp, "technical/architecture.md", body);
 }
+
+/**
+ * The Phase 1 module table, copied verbatim into the matrix. Realistic failure:
+ * `M` fits `[A-Za-z]{1,4}`, so before the lookahead this echo counted as findings
+ * and a matrix with zero findings passed the gate.
+ */
+const MODULE_ECHO = MODULE_TABLE;
 
 function cleanTempWorkspace(tmp: string): void {
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -954,6 +968,31 @@ test("a severity grid is long enough but not analysable, so it blocks", () => {
   } finally {
     cleanTempWorkspace(tmp);
   }
+});
+
+test("an echo of the module table is not a set of findings", () => {
+  const { engine, tmp } = engineAt(2);
+  try {
+    markAll(engine, 2);
+    // Phase 1 now writes M-01 ids, and M fits [A-Za-z]{1,4}. Copying that table
+    // into the matrix produced a file with zero findings that passed the gate.
+    writeCoverageMatrix(tmp, MODULE_ECHO);
+    assert.ok(!engine.advancePhase(3).ok, "a matrix with no findings must not pass");
+
+    // The lookahead must not take Mechanical Engineering with it.
+    writeCoverageMatrix(tmp, MECHANICAL_FINDING);
+    assert.ok(engine.advancePhase(3).ok, "MEC- is a finding prefix, not a module one");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the reserved module prefix is stated in the guidance", () => {
+  // The lookahead alone would silently drop a finding a model chose to prefix
+  // M-, so the rule has to be told, not just enforced.
+  const g = getCompleteGuidance();
+  assert.ok(g.includes("RESERVED for modules"));
+  assert.ok(g.includes("MEC-"), "the alternative prefix must be named");
 });
 
 test("countArtifactRows counts findings, not grid rows", () => {

@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.6.2] - 2026-08-05
+
+Standalone patch `APLICAR-FIX-ECO-DE-MODULO-NA-MATRIZ-NOS-OUTROS-BUILDS.md`, from
+Versus for Claude 0.12.4. Found by the Kimi build.
+
+### Fixed
+
+- **The coverage-matrix gate accepted module rows as findings.** The architecture
+  patch (0.6.0) made Phase 1 write `M-01` module ids, and the matrix pattern
+  `[A-Za-z]{1,4}-\d+` matches `M-01` because `M` fits `{1,4}`. So a
+  `coverage-matrix.md` that was nothing but an echo of the module table — zero
+  findings — satisfied the Phase 2 gate: with `count: 1`, one `| M-01 | … |` line
+  at the top was enough. A matrix with no findings is the one thing RO3 cannot
+  have. The pattern now carries a negative lookahead, `(?!M-)`, so literal `M-`
+  rows do not count.
+
+  Verified against the bundled server: a matrix that is the module table verbatim
+  blocks `advance_phase(3)`, and a real `| MEC-01 | gearbox | Mechanical
+  Engineering | … |` row advances.
+
+### Changed
+
+- **Phase 2's guidance now reserves the prefix.** The lookahead alone has a trap:
+  Mechanical Engineering is one of the 19 lenses, and a model that picked `M-` for
+  it would have its findings silently dropped from the count — and be
+  indistinguishable from modules in the RO3 parser. The guidance states the id
+  prefix should be consistent per lens, that `M-` is reserved for modules, and
+  that the Mechanical Engineering lens uses `MEC-`.
+
+  The spec assumed a "use a consistent prefix per lens" paragraph already existed
+  to append to; this build had none, so both the prefix rule and the reservation
+  were added to the Phase 2 findings-table block.
+
+### Notes
+
+- Honest limit, carried from the spec: the lookahead closes the *literal* `M-`
+  echo, which is the realistic failure (the model copies the architecture table
+  verbatim). An echo relabelled `MOD-01`, or lowercased to `m-01`, would still
+  pass. The gate checks form, not semantics; the prefix reservation is what closes
+  the real vector.
+
 ## [0.6.1] - 2026-08-05
 
 Standalone patch `APLICAR-FIX-EXEMPLO-POR-ARTEFATO-NOS-OUTROS-BUILDS.md`, from
