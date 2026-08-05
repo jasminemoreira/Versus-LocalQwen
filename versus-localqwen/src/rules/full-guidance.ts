@@ -37,7 +37,7 @@ Rules: ONE question per block. Separate blocks with horizontal rule (---). Max 4
 Per phase:
 - **P0:** Score breakdown table (all 10 criteria + weights + total). Teach-back synthesis (full 5-level template). Delivery Target question.
 - **P1:** 4 architecture answers. Pattern summary table. Progressive Scope decision (if applicable). Technology comparison table (if >1 option).
-- **P2:** Coverage matrix (modules × lenses with 🔴🟡🟢). Concentration analysis (by module + by lens). Activated conditional lenses list. Exit gate summary.
+- **P2:** Coverage findings table (one row per finding: id | module | lens | severity | description). Concentration analysis (by module + by lens). Activated conditional lenses list. Exit gate summary.
 - **P3:** Post-cycle decision (AI computes structural change % and criticals, presents recommendation, user confirms). Anti-scope-creep checklist verification. LOC justification (if >10% increase).
 - **P4:** Convergence verification report (exit criteria + safeguards + specs status). LLM Switch Point decision (asked, not announced).
 - **P5:** Progress announcements ("X/N completed, next: Y") after each file.
@@ -431,7 +431,7 @@ Conditional lens activation: review ProjectSpec (stack, constraints, out-of-scop
 **GENERATION MODE:** Phase 2 operates in generative mode — produce failure scenarios, not quality judgments. "How does this module fail?" generates new content (no confirmation bias anchor). "Is this design good?" asks the AI to evaluate what it produced (confirmation bias activated). The lens central questions are already in generative mode — follow them as written.
 
 ### Coverage Matrix (mandatory) (⚠️ MUST DISPLAY complete table in chat — do NOT summarize or skip modules/lenses):
-Table of modules × lenses (universal + activated conditional) with severities.
+One row per finding: id | module | lens | severity | description. Every module × lens pair (universal + activated conditional) must be accounted for — a pair that produced nothing is a valid result, recorded as such rather than left out.
 
 ### Concentration analysis (MANDATORY after the matrix) (⚠️ MUST DISPLAY analysis in chat):
 - **Concentration by module:** Module with findings across ALL lenses → probably poorly conceived → requires REDESIGN, not patch.

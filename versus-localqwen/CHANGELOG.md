@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.2] - 2026-08-05
+
+### Fixed
+
+- **The criterion description still asked for the grid the gate rejects.** 0.5.1
+  changed the coverage matrix to a findings table and gated its structure, but
+  left `coverage_matrix`'s description reading "Coverage matrix modules x lenses
+  displayed in chat" — and that description is exactly what the model reads from
+  `get_exit_criteria` and from the blocked-transition message. It was being told
+  to produce the shape that gets it blocked.
+
+  Two more places said the same thing: the R5 mandatory-display line for P2, and
+  the "Coverage Matrix (mandatory)" heading in the Phase 2 guidance. All three now
+  describe one row per finding.
+
+  The Phase 2 heading also gained what the grid conveyed and a findings table can
+  lose: every module × lens pair must still be accounted for, and a pair that
+  produced nothing is a valid result recorded as such rather than omitted.
+
 ## [0.5.1] - 2026-08-05
 
 Delta from Versus for Claude 0.12.0 (commit `5998fed`), on top of the 0.11.0
