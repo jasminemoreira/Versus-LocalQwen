@@ -499,6 +499,9 @@ Trade-offs resolved by the HUMAN OPERATOR (S2: stopping criterion is the user's)
 ### Step 0 — Read \`specs/design/coverage-matrix.md\`:
 Address the findings **by id**, one at a time, from that file rather than from memory — Phase 2 wrote it precisely so this phase survives a compaction between the two. Record what each id resolved to, and where a finding was accepted as risk rather than fixed, record_decision it against its id. An id you cannot account for is scope you deferred silently (AP10).
 
+### Updating the architecture doc: APPEND V(N+1), never overwrite V(N).
+Add a new \`## V(N+1)\` section to \`specs/technical/architecture.md\`, with its own module table — do NOT replace the previous one. The Phase 2↔3 loop critiques a DIFFERENT architecture each round: a finding from iteration 1 can name a module that V(2) removed. Overwrite it and that finding points at a module no artifact records any more, so the per-module traceability the coverage matrix exists for breaks exactly where the design changed most. Keep every version; the last section is the current one.
+
 ### Purpose: Simplify V(N) → V(N+1), eliminating complexity.
 **CAUTION AP2 (Complexity as false solution):** Each iteration must SIMPLIFY, not complexify.
 

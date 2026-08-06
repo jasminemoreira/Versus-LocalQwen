@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.6.3] - 2026-08-05
+
+Standalone patch `APLICAR-ARQUITETURA-POR-VERSAO-NOS-OUTROS-BUILDS.md`, from
+Versus for Claude 0.12.5. Guidance only — no code, no gate, no test changed.
+
+### Changed
+
+- **Phase 3 now appends `## V(N+1)` to the architecture doc instead of
+  overwriting it.** The Phase 2↔3 loop critiques a different architecture every
+  round, so a finding from iteration 1 can name a module that V(2) removed.
+  Overwriting the table erases the only artifact where that module was ever
+  named, and the per-module traceability the coverage matrix exists to give
+  breaks precisely where the design moved most. Upstream saw this happen in the
+  T01 pilot (`quota-limiter`). Every version is kept; the last section is the
+  current one.
+
+### Notes
+
+- The spec says its block carries no backticks to escape; it carries two pairs
+  (`## V(N+1)` and the file path), escaped here as the surrounding template
+  literal requires. Verified in the rendered guidance, not just the source.
+- The Phase 1 row gate is unaffected: it counts `M-` rows across the whole file,
+  so extra version sections only add to the count.
+
 ## [0.6.2] - 2026-08-05
 
 Standalone patch `APLICAR-FIX-ECO-DE-MODULO-NA-MATRIZ-NOS-OUTROS-BUILDS.md`, from
