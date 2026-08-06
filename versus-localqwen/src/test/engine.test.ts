@@ -46,18 +46,20 @@ function writeSpecArtifact(tmp: string, rel: string, body = "x".repeat(120)): vo
  * finding, each with its own id, so overlap can be told from orthogonality.
  */
 const FINDINGS_TABLE = [
+  "## Iteração 1 — V(1)",
+  "",
   "| id | module | lens | severity | description |",
   "|----|--------|------|----------|-------------|",
-  "| P-01 | auth | Security | 🔴 | password reaches the log on failed login |",
-  "| P-02 | store | Assumptions | 🟡 | assumes the schema never changes |",
-  "| ARQ-3 | api | Architectural | 🟢 | controller and transport are coupled |",
+  "| P-01 | rate-limiter | Security | 🔴 | the key reaches the log on a denied call |",
+  "| P-02 | store | Assumptions | 🟡 | assumes the counter never wraps |",
+  "| ARQ-3 | rate-limiter | Architectural | 🟢 | quota policy and transport are coupled |",
 ].join("\n");
 
 /** Mechanical Engineering is a real lens; its prefix must survive the lookahead. */
 const MECHANICAL_FINDING = [
   "| id | module | lens | severity | description |",
   "|----|--------|------|----------|-------------|",
-  "| MEC-01 | gearbox | Mechanical Engineering | 🔴 | no tolerance for shaft play |",
+  "| MEC-01 | store | Mechanical Engineering | 🔴 | no tolerance for a counter written out of order |",
 ].join("\n");
 
 /** A grid of severities: same size, same lenses, no finding is identifiable. */
@@ -314,6 +316,7 @@ test("loop Phase 2↔3 allowed", () => {
 
   // Phase 2 → 3
   for (const c of engine.getExitCriteriaWithDefs(2)) engine.markExitCriterion(2, c.criterion, true);
+  declareLenses(engine);
   writeCoverageMatrix(workspace);
   const to3 = engine.advancePhase(3);
   assert.strictEqual(to3.ok, true);
@@ -854,6 +857,20 @@ test("a CommonJS bundle dies under a type:module project without the pin", () =>
 
 console.log("\n=== Evidence Gate Tests ===\n");
 
+/**
+ * The per-round lens declaration Phase 2 owes. The tokens are the contract an
+ * external analysis reads, so the fixture spells them the way the guidance does.
+ */
+function declareLenses(engine: StateEngine, iteration = 1): void {
+  engine.recordDecision(
+    2,
+    "architecture",
+    `LENTES ATIVADAS — iteração ${iteration}, contra V(${iteration}). Universais (7, sempre): todas. ` +
+      "Condicionais ATIVADAS (1): Resilience. NÃO ativadas, com justificativa: UI/UX (no interface " +
+      "in this cycle); Migration (greenfield, nothing to coexist with)."
+  );
+}
+
 function markAll(engine: StateEngine, phase: number): void {
   const { getExitCriteriaForPhase } = require("../rules/phases");
   for (const def of getExitCriteriaForPhase(phase)) {
@@ -920,6 +937,7 @@ test("a trivial artifact does not count as evidence", () => {
   const { engine, tmp } = engineAt(2);
   try {
     markAll(engine, 2);
+    declareLenses(engine);
     // A heading alone is the shape of a file written to satisfy a checker.
     writeCoverageMatrix(tmp, "# Coverage Matrix\n");
     assert.ok(!engine.advancePhase(3).ok, "80 non-whitespace chars is the floor");
@@ -945,6 +963,7 @@ test("a severity grid is long enough but not analysable, so it blocks", () => {
   const { engine, tmp } = engineAt(2);
   try {
     markAll(engine, 2);
+    declareLenses(engine);
     writeCoverageMatrix(tmp, SEVERITY_GRID);
 
     // The grid clears the size floor — that is the whole point of the structural
@@ -974,6 +993,7 @@ test("an echo of the module table is not a set of findings", () => {
   const { engine, tmp } = engineAt(2);
   try {
     markAll(engine, 2);
+    declareLenses(engine);
     // Phase 1 now writes M-01 ids, and M fits [A-Za-z]{1,4}. Copying that table
     // into the matrix produced a file with zero findings that passed the gate.
     writeCoverageMatrix(tmp, MODULE_ECHO);
@@ -1064,6 +1084,261 @@ test("start_new_cycle requires the lessons file", () => {
   } finally {
     cleanTempWorkspace(tmp);
   }
+});
+
+// --- Per-iteration traceability (RO3 contract) ---
+
+console.log("\n=== Loop Traceability Tests ===\n");
+
+/** Drives a fresh project up to Phase 2 with the architecture on disk. */
+function atPhase2(): { engine: StateEngine; tmp: string } {
+  const tmp = createTempWorkspace();
+  const e = new StateEngine(tmp);
+  e.initProject("loop", "traceability");
+  e.updateScore(95, makeFullBreakdown(95));
+  markAll(e, 0);
+  e.advancePhase(1);
+  markAll(e, 1);
+  writeArchitectureDoc(tmp);
+  e.advancePhase(2);
+  return { engine: e, tmp };
+}
+
+test("Phase 2 will not advance without a lens declaration for this round", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    writeCoverageMatrix(tmp);
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok, "every criterion is marked, but nothing declared the lens set");
+    if (!blocked.ok) {
+      assert.ok(
+        blocked.error.missingCriteria.some((m) => m.includes("lens declaration found for iteration 1")),
+        "the block must name the round it wants"
+      );
+    }
+    declareLenses(e, 1);
+    assert.ok(e.advancePhase(3).ok, "the declaration unblocks it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the declaration must name the architecture version it was made against", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    writeCoverageMatrix(tmp);
+    // Round named, version omitted: datable but not attributable to a design.
+    e.recordDecision(2, "architecture", "LENTES ATIVADAS — iteração 1: as 7 universais e mais nada.");
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok);
+    if (!blocked.ok) {
+      assert.ok(blocked.error.missingCriteria.some((m) => m.includes("architecture version")));
+    }
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("re-entering Phase 2 opens a new round and asks for its own declaration", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    declareLenses(e, 1);
+    writeCoverageMatrix(tmp);
+    assert.ok(e.advancePhase(3).ok);
+    assert.strictEqual(e.getPhaseState()!.currentIteration, 1, "2→3 stays inside round 1");
+
+    markAll(e, 3);
+    assert.ok(e.advancePhase(2).ok, "the loop back is always allowed");
+    assert.strictEqual(e.getPhaseState()!.currentIteration, 2, "3→2 opens round 2");
+
+    const criteria = e.getExitCriteriaWithDefs(2);
+    const lens = criteria.find((c) => c.criterion === "activated_lenses_recorded");
+    assert.strictEqual(lens!.met, false, "the previous declaration looked at V(1)");
+
+    // Round 1's declaration must not satisfy round 2 — that is the accumulation
+    // this whole mechanism exists to prevent.
+    markAll(e, 2);
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok);
+    if (!blocked.ok) {
+      assert.ok(blocked.error.missingCriteria.some((m) => m.includes("iteration 2")));
+    }
+
+    declareLenses(e, 2);
+    // Round 2 also owes its own section in the matrix; without it every finding
+    // in the file would read as round 1.
+    const stillRound1 = e.advancePhase(3);
+    assert.ok(!stillRound1.ok, "the matrix still only has iteration 1");
+    if (!stillRound1.ok) {
+      assert.ok(stillRound1.error.missingCriteria.some((m) => m.includes("no section for iteration 2")));
+    }
+
+    writeCoverageMatrix(tmp, [
+      FINDINGS_TABLE,
+      "",
+      "## Iteração 2 — V(2)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| RES-01 | store | Resilience | 🟡 | a failed write leaves the counter behind |",
+    ].join("\n"));
+    assert.ok(e.advancePhase(3).ok);
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a finding may not name a module no architecture version declares", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    declareLenses(e, 1);
+    writeCoverageMatrix(tmp, [
+      "## Iteração 1 — V(1)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| P-01 | quota-limiter | Security | 🔴 | typo: the module is called rate-limiter |",
+    ].join("\n"));
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok, "a finding Phase 3 cannot route must not pass");
+    if (!blocked.ok) {
+      const msg = blocked.error.missingCriteria.join(" ");
+      assert.ok(msg.includes("quota-limiter"), "name the module that does not exist");
+      assert.ok(msg.includes("rate-limiter"), "and the ones that do");
+    }
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a module dropped between versions still holds the findings raised against it", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    // Round 1 critiques V(1), which is all that exists yet.
+    const V1 = ["## V(1)", "", MODULE_TABLE].join("\n");
+    writeArchitectureDoc(tmp, V1);
+    const round1 = [
+      "## Iteração 1 — V(1)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| P-01 | rate-limiter | Security | 🔴 | the key reaches the log on a denied call |",
+    ].join("\n");
+    writeCoverageMatrix(tmp, round1);
+
+    // Get to round 2 the way the loop does, growing the matrix as it goes.
+    markAll(e, 2);
+    declareLenses(e, 1);
+    assert.ok(e.advancePhase(3).ok);
+    markAll(e, 3);
+
+    // Phase 3 drops rate-limiter, as it is entitled to. Iteration 1's findings
+    // named it legitimately; only the round in progress answers to V(2).
+    writeArchitectureDoc(tmp, [
+      V1,
+      "",
+      "## V(2)",
+      "",
+      "| id | module | responsibility | interface | depends-on |",
+      "|------|-------|------------------|------------------------|---|",
+      "| M-01 | store | counters and quota | get(key) / allow(key) | — |",
+    ].join("\n"));
+
+    assert.ok(e.advancePhase(2).ok);
+    markAll(e, 2);
+    declareLenses(e, 2);
+    writeCoverageMatrix(tmp, [
+      round1,
+      "",
+      "## Iteração 2 — V(2)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| P-02 | store | Assumptions | 🟡 | assumes the counter never wraps |",
+    ].join("\n"));
+
+    const result = e.advancePhase(3);
+    assert.ok(result.ok, "an evolving architecture is the normal case, not a violation");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the current round is held to the current architecture version", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    writeArchitectureDoc(tmp, [
+      "## V(1)",
+      "",
+      MODULE_TABLE,
+      "",
+      "## V(2)",
+      "",
+      "| id | module | responsibility | interface | depends-on |",
+      "|------|-------|------------------|------------------------|---|",
+      "| M-01 | store | counters and quota | get(key) / allow(key) | — |",
+    ].join("\n"));
+    // Round 2 critiques V(2), where rate-limiter no longer exists.
+    writeCoverageMatrix(tmp, [
+      "## Iteração 2 — V(2)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| P-02 | rate-limiter | Security | 🔴 | raised against a module V(2) removed |",
+    ].join("\n"));
+
+    (e.getPhaseState() as any).currentIteration = 2;
+    markAll(e, 2);
+    declareLenses(e, 2);
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok, "the round in progress answers to the design in front of it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("projectSpec entries carry the phase and the moment they were recorded", () => {
+  engine.initProject("spec", "stamps");
+  engine.updateProjectSpec({ stack: ["TypeScript"] });
+  const [first] = engine.getProjectSpec().stack;
+  assert.strictEqual(typeof first, "object");
+  assert.strictEqual((first as any).value, "TypeScript");
+  assert.strictEqual((first as any).phase, 0);
+  assert.ok(!Number.isNaN(Date.parse((first as any).at)), "the stamp must be a real instant");
+
+  // Re-adding must not move the date forward: the question is when the project
+  // first knew this, not when it last repeated it.
+  const at = (first as any).at;
+  engine.updateProjectSpec({ stack: ["TypeScript", "Node 18+"] });
+  const stack = engine.getProjectSpec().stack;
+  assert.strictEqual(stack.length, 2, "the repeat is not a second entry");
+  assert.strictEqual((stack[0] as any).at, at);
+});
+
+test("a spec written before the stamps still reads", () => {
+  engine.initProject("spec", "back-compat");
+  // What 0.6.x wrote to disk.
+  (engine.getPhaseState() as any).projectSpec = {
+    stack: ["TypeScript"], outOfScope: [], patterns: [], constraints: [],
+  };
+  engine.updateProjectSpec({ stack: ["TypeScript", "Node 18+"] });
+  const stack = engine.getProjectSpec().stack;
+  assert.strictEqual(stack.length, 2, "the bare string is the same entry, not a new one");
+  assert.strictEqual(stack[0], "TypeScript", "old entries are left as they were");
+  assert.strictEqual((stack[1] as any).value, "Node 18+");
+});
+
+test("the guidance states the contract the analysis reads", () => {
+  const g = getCompleteGuidance();
+  // The iteration token is Portuguese on purpose — it is what downstream matches.
+  assert.ok(g.includes("## Iteração 2 — V(2)"), "the matrix section heading");
+  assert.ok(g.includes("LENTES ATIVADAS — iteração 2, contra V(2)"), "the declaration opener");
+  assert.ok(/Activation is by PROJECT SIGNAL/.test(g), "redundancy is not grounds to skip a lens");
+  assert.ok(/duplica\S* applies \*\*within a single lens/.test(g), "duplica within one lens");
 });
 
 console.log("\n=== All tests completed ===\n");

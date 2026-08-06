@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.7.0] - 2026-08-06
+
+Applies `RO3/CORRECOES-EXTENSAO.md` — the seven corrections the RO3 analysis
+asked for, so the artifacts the batch reads can be dated, versioned and traced.
+Minor bump rather than patch: `projectSpec` entries changed shape, and Phase 2
+gained two gates that will block projects the previous build let through.
+
+### Added
+
+- **Per-round lens declaration (item 1).** Re-entering Phase 2 clears
+  `activated_lenses_recorded`, and the gate now looks for a `record_decision`
+  (phase 2, category `architecture`) carrying the lens marker and *this* round's
+  number. One accumulated declaration cannot say which set was in force when a
+  given finding was raised — the union of every round always contains the lens,
+  which erases exactly the signal the correction creates.
+- **The declaration names its architecture version (item 2).** `V(N)` is
+  required in the same line. Without it the version has to be inferred from
+  timestamps, which is where "estimated against V(1) or V(final)?" comes from.
+- **Timestamps on `projectSpec` entries (item 4).** `stack`, `outOfScope`,
+  `patterns` and `constraints` now hold `{ value, phase, at }`. Bare strings from
+  older projects are still read, and merging keeps the FIRST stamp for a value —
+  re-adding an entry does not make it newer, since the question the stamp answers
+  is when the project first knew this. This is what lets an external estimator
+  include only the entries provably earlier than the critique instead of dropping
+  the spec whole.
+- **Cross gate `matrix.module ⊆ architecture.modules` (item 6).** Deliberately
+  asymmetric across rounds: the round in progress answers to the current
+  `## V(N)`, earlier rounds to any version on record. A module dropped between
+  V(1) and V(2) is the normal case, and iteration 1's findings still name it
+  legitimately — a naive check here would block every project whose architecture
+  actually changed, which upstream hit with `quota-limiter` in T13.
+
+### Changed
+
+- **The iteration counter now belongs to the 2↔3 loop.** It was reset to 1 on
+  every transition, so every round read as iteration 1 — the same as having no
+  counter. `3→2` increments it, `2→3` keeps it (Phase 3 writes the V(N+1) the
+  next round critiques), everything else still resets.
+- **Activation is by project signal only (item 3).** Phase 2's guidance now says
+  that another lens appearing to cover the same failure class is not grounds to
+  skip one, naming the T05 case (Mechanical Engineering skipped as redundant with
+  Resilience). Lenses that overlap never running together makes the overlap
+  unobservable by construction. The individual justification per non-activated
+  lens stays mandatory — that text is the evidence.
+- **The matrix carries a section heading per round (item 5).** `## Iteração N —
+  V(N)`, appended above the previous rounds, never a new column: a column before
+  the id would break the row gate, the frozen finding format, and every fixture
+  written against them.
+- **`duplica` applies within a single lens too (item 7).** One lens raising the
+  same defect under two ids inflates its own exclusive contribution while the
+  taxonomy has nothing to do with it (T13: `SCI-01 + SCI-06`, `LNG-01 + LNG-02`).
+
+### Notes
+
+- Item 5 was specified as guidance only. It is also gated, but only from round 2
+  on: past round 1 a missing heading silently collapses every finding into
+  iteration 1, and a wrong answer nobody reports is worse than a block. In round
+  1 the default is already right, so an absent heading costs nothing.
+- The iteration and lens-declaration tokens are matched by a Portuguese-first
+  regex downstream (`itera[cç][aã]o\s*(\d+)`), so the guidance asks for
+  `Iteração N` and `LENTES ATIVADAS` literally even though it is otherwise in
+  English. The engine also accepts `iteration N` / `ACTIVATED LENSES`, since a
+  build that only fails downstream fails silently.
+- Verified through the bundled MCP server, not only the engine: a full 2↔3 round
+  trip where Phase 3 drops a module, round 2 is blocked for naming it, and round
+  1's finding against the same module stays valid.
+
 ## [0.6.3] - 2026-08-05
 
 Standalone patch `APLICAR-ARQUITETURA-POR-VERSAO-NOS-OUTROS-BUILDS.md`, from

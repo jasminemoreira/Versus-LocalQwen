@@ -14,9 +14,19 @@ import {
   Result,
   createDefaultState,
   SafeguardState,
+  ProjectSpec,
+  SpecItem,
+  specItemValue,
 } from "./types";
 
-import { isValidTransition, getExitCriteriaForPhase, CRITERION_ID_MIGRATION } from "../rules/phases";
+import { isValidTransition, getExitCriteriaForPhase, CRITERION_ID_MIGRATION, LENS_DECLARATION_CRITERION } from "../rules/phases";
+import {
+  ITERATION_MARK,
+  LENS_MARKER,
+  VERSION_MARK,
+  parseArchitectureVersions,
+  parseMatrixIterations,
+} from "./artifacts";
 import {
   SafeguardResult,
   validateSafeguard,
@@ -265,12 +275,45 @@ export class StateEngine {
     });
 
     this.state.currentPhase = targetPhase;
-    this.state.currentIteration = 1;
+
+    /**
+     * The iteration counter belongs to the 2↔3 loop, so the loop must not reset
+     * it: going back to 2 opens round N+1, and 2→3 stays inside round N (Phase 3
+     * writes the V(N+1) that round N+1 will critique). Resetting on every
+     * transition made every round "iteration 1", which is the same as having no
+     * counter — nothing downstream could tell which architecture a finding was
+     * raised against.
+     */
+    if (from === 3 && targetPhase === 2) {
+      this.state.currentIteration += 1;
+    } else if (!(from === 2 && targetPhase === 3)) {
+      this.state.currentIteration = 1;
+    }
+
+    // Re-entering Phase 2 opens a new critique of a DIFFERENT architecture, so
+    // the lens set has to be declared again against that version — the previous
+    // declaration was made looking at V(N-1).
+    if (targetPhase === 2 && from === 3) {
+      this.resetLensDeclaration();
+    }
+
     this.state.loopCounter = { pattern: "", count: 0, firstSeen: "", lastSeen: "" };
     this.save();
 
     // Returns OK with specs warnings if any
     return { ok: true, value: undefined };
+  }
+
+  /** Clears activated_lenses_recorded so the gate asks for a fresh declaration. */
+  private resetLensDeclaration(): void {
+    if (!this.state) return;
+    const c = this.state.exitCriteria.find(
+      (e) => e.phase === 2 && e.criterion === LENS_DECLARATION_CRITERION
+    );
+    if (c) {
+      c.met = false;
+      c.details = undefined;
+    }
   }
 
   startIteration(phase: number): Result<IterationInfo, string> {
@@ -282,6 +325,11 @@ export class StateEngine {
     }
 
     this.state.currentIteration += 1;
+    // Same reason as re-entry through the loop: a new round of Phase 2 critiques
+    // a new architecture, so its lens set is a new declaration.
+    if (phase === 2) {
+      this.resetLensDeclaration();
+    }
     this.save();
 
     return {
@@ -323,14 +371,34 @@ export class StateEngine {
       this.state.projectSpec = { stack: [], outOfScope: [], patterns: [], constraints: [] };
     }
     const ps = this.state.projectSpec;
-    if (spec.stack) ps.stack = dedupe([...ps.stack, ...spec.stack]);
-    if (spec.outOfScope) ps.outOfScope = dedupe([...ps.outOfScope, ...spec.outOfScope]);
-    if (spec.patterns) ps.patterns = dedupe([...ps.patterns, ...spec.patterns]);
-    if (spec.constraints) ps.constraints = dedupe([...ps.constraints, ...spec.constraints]);
+    const at = new Date().toISOString();
+    const phase = this.state.currentPhase;
+
+    /**
+     * Merge, keeping the FIRST stamp for a value. Re-adding an entry does not
+     * make it newer: the question the stamp answers is when the project first
+     * knew this, so a later repeat must not push the date forward past the
+     * phase that acted on it.
+     */
+    const merge = (existing: SpecItem[], incoming: string[]): SpecItem[] => {
+      const out = [...existing];
+      const seen = new Set(out.map((i) => specItemValue(i)));
+      for (const value of incoming) {
+        if (seen.has(value)) continue;
+        seen.add(value);
+        out.push({ value, phase, at });
+      }
+      return out;
+    };
+
+    if (spec.stack) ps.stack = merge(ps.stack, spec.stack);
+    if (spec.outOfScope) ps.outOfScope = merge(ps.outOfScope, spec.outOfScope);
+    if (spec.patterns) ps.patterns = merge(ps.patterns, spec.patterns);
+    if (spec.constraints) ps.constraints = merge(ps.constraints, spec.constraints);
     this.save();
   }
 
-  getProjectSpec(): { stack: string[]; outOfScope: string[]; patterns: string[]; constraints: string[] } {
+  getProjectSpec(): ProjectSpec {
     if (!this.state) throw new Error("Project not initialized.");
     return this.state.projectSpec ?? { stack: [], outOfScope: [], patterns: [], constraints: [] };
   }
@@ -500,6 +568,127 @@ export class StateEngine {
         );
       }
     }
+    if (phase === 2) {
+      out.push(...this.lensDeclarationEvidence());
+      out.push(...this.moduleTraceabilityEvidence());
+    }
+    return out;
+  }
+
+  /** Text of the artifact, or "" when it is not there. */
+  private readArtifact(relPath: string): string {
+    try {
+      const full = path.join(this.specsPath, relPath);
+      return fs.existsSync(full) ? fs.readFileSync(full, "utf-8") : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * The lens set must be declared once per round of the 2↔3 loop, naming the
+   * round and the architecture version it was chosen against. One accumulated
+   * declaration cannot say which set was in force when a given finding was
+   * raised, so "this finding used a lens nobody activated" stops being checkable
+   * — the union of every round always contains it.
+   */
+  private lensDeclarationEvidence(): string[] {
+    if (!this.state) return [];
+    const iteration = this.state.currentIteration;
+    const candidates = this.state.decisions.filter(
+      (d) => d.phase === 2 && d.category === "architecture" && LENS_MARKER.test(d.content)
+    );
+
+    const forThisRound = candidates.filter((d) => {
+      const m = ITERATION_MARK.exec(d.content);
+      const n = m ? Number(m[1] ?? m[2]) : NaN;
+      return n === iteration;
+    });
+
+    if (forThisRound.length === 0) {
+      return [
+        `[Phase 2] activated_lenses_recorded: no lens declaration found for iteration ${iteration}. ` +
+        `Each round of the 2↔3 loop critiques a different architecture, so each round declares its ` +
+        `own set: record_decision(phase=2, category='architecture', content="LENTES ATIVADAS — ` +
+        `iteração ${iteration}, contra V(${iteration}): ..."). Keep the tokens 'LENTES ATIVADAS', ` +
+        `'iteração ${iteration}' and 'V(N)' literal — they are read by an external analysis, and a ` +
+        `declaration it cannot date is a declaration it has to discard. List the non-activated ` +
+        `lenses with an individual justification, as always.`,
+      ];
+    }
+
+    if (!forThisRound.some((d) => VERSION_MARK.test(d.content))) {
+      return [
+        `[Phase 2] activated_lenses_recorded: the iteration ${iteration} lens declaration does not ` +
+        `name the architecture version it was made against. Add 'V(N)' to it — without it the ` +
+        `version has to be inferred from timestamps, which is where the "estimated against V(1) or ` +
+        `V(final)?" ambiguity comes from.`,
+      ];
+    }
+
+    return [];
+  }
+
+  /**
+   * Every module a finding names must be a module some architecture version
+   * declared. The check is deliberately asymmetric across rounds: the current
+   * round is held to the CURRENT version, while earlier rounds are allowed any
+   * version that ever existed. A design that dropped a module between V(1) and
+   * V(2) is the normal case, not the exception, and iteration 1's findings still
+   * point at it legitimately — a gate that forgot this would block every project
+   * whose architecture actually changed.
+   */
+  private moduleTraceabilityEvidence(): string[] {
+    const archText = this.readArtifact("technical/architecture.md");
+    const matrixText = this.readArtifact("design/coverage-matrix.md");
+    if (!archText || !matrixText) return [];
+
+    const versions = parseArchitectureVersions(archText);
+    const iterations = parseMatrixIterations(matrixText);
+    if (versions.length === 0 || iterations.length === 0) return [];
+
+    const current = new Set(versions[versions.length - 1].modules);
+    const everDeclared = new Set(versions.flatMap((v) => v.modules));
+    const out: string[] = [];
+
+    /**
+     * Which section is this round. Past round 1 the heading is required, because
+     * without it every finding in the file collapses into iteration 1 and
+     * nothing reports it — a silent wrong answer, not an error. In round 1 the
+     * default is already right, so an absent heading costs nothing.
+     */
+    const round = this.state?.currentIteration ?? 1;
+    let currentIdx = iterations.findIndex((it) => it.iteration === round);
+    if (currentIdx === -1) {
+      if (round > 1) {
+        out.push(
+          `[Phase 2] coverage_matrix: specs/design/coverage-matrix.md has no section for iteration ` +
+          `${round}. Append '## Iteração ${round} — V(${round})' above this round's rows, keeping ` +
+          `the previous rounds below it — the token 'Iteração ${round}' is literal. Without the ` +
+          `heading every finding in the file reads as iteration 1, and no one is told.`
+        );
+      }
+      currentIdx = iterations.length - 1;
+    }
+
+    iterations.forEach((it, idx) => {
+      const isCurrentRound = idx === currentIdx;
+      const allowed = isCurrentRound ? current : everDeclared;
+      const unknown = it.modules.filter((m) => !allowed.has(m));
+      if (unknown.length === 0) return;
+
+      const where = it.iteration === null ? "the matrix" : `iteration ${it.iteration}`;
+      const against = isCurrentRound
+        ? `the current architecture version${versions[versions.length - 1].version !== null ? ` V(${versions[versions.length - 1].version})` : ""}`
+        : "any architecture version on record";
+      out.push(
+        `[Phase 2] coverage_matrix: ${where} names module(s) ${unknown.map((m) => `'${m}'`).join(", ")} ` +
+        `that ${against} does not declare. Known modules: ${[...allowed].join(", ")}. Either use the ` +
+        `name from the module table in specs/technical/architecture.md, or add the module there — a ` +
+        `finding against a module no artifact records is a finding Phase 3 cannot route.`
+      );
+    });
+
     return out;
   }
 
@@ -689,8 +878,4 @@ export class StateEngine {
       default: return [];
     }
   }
-}
-
-function dedupe(arr: string[]): string[] {
-  return [...new Set(arr)];
 }

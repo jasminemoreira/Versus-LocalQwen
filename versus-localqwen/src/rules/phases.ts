@@ -107,6 +107,13 @@ export const PHASE_DEFINITIONS: PhaseDefinition[] = [
   },
 ];
 
+/**
+ * The criterion that is cleared on every re-entry into Phase 2. Named here
+ * rather than spelled inline in the engine, so the reset and the definition
+ * cannot drift apart.
+ */
+export const LENS_DECLARATION_CRITERION = "activated_lenses_recorded";
+
 export const EXIT_CRITERIA: ExitCriterionDef[] = [
   // Phase 0
   { phase: 0, criterion: "score_90", description: "Score >= 90/100", required: true },

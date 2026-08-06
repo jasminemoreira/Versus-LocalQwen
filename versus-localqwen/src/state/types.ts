@@ -21,12 +21,33 @@ export interface PhaseState {
   history: PhaseTransition[];    // transition log
 }
 
+/**
+ * One projectSpec entry, stamped with when it was recorded. Without the stamp
+ * the spec can only be read as it stands now, so "which entries existed when
+ * Phase 2 declared its lenses?" has no answer — and an analysis that cannot date
+ * the spec has to drop it whole rather than risk crediting the critique with
+ * context it never saw.
+ */
+export interface SpecEntry {
+  value: string;
+  phase: number;
+  at: string;                    // ISO timestamp
+}
+
+/** Read in both forms: bare strings from projects written before 0.7.0, and stamped entries. */
+export type SpecItem = string | SpecEntry;
+
 /** Structured technical context — survives model switches */
 export interface ProjectSpec {
-  stack: string[];               // approved technologies (e.g., "TypeScript", "Node 18+")
-  outOfScope: string[];          // explicitly excluded (e.g., "Local models")
-  patterns: string[];            // architectural patterns (e.g., "MCP server standalone")
-  constraints: string[];         // rigid constraints (e.g., "local model only, no cloud fallback")
+  stack: SpecItem[];             // approved technologies (e.g., "TypeScript", "Node 18+")
+  outOfScope: SpecItem[];        // explicitly excluded (e.g., "Local models")
+  patterns: SpecItem[];          // architectural patterns (e.g., "MCP server standalone")
+  constraints: SpecItem[];       // rigid constraints (e.g., "local model only, no cloud fallback")
+}
+
+/** The text of an entry, whichever form it was stored in. */
+export function specItemValue(item: SpecItem): string {
+  return typeof item === "string" ? item : item.value;
 }
 
 /**

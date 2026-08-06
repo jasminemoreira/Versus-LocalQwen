@@ -433,6 +433,20 @@ Selection principle: if removing this lens, is there a failure class that NO oth
 
 Conditional lens activation: review ProjectSpec (stack, constraints, out-of-scope) and activate applicable lenses (situational + DTLs). Record activated set with record_decision(category='architecture').
 
+### DECLARE THE LENS SET ONCE PER ITERATION (MANDATORY — the gate blocks without it):
+Every round of the 2↔3 loop critiques a DIFFERENT architecture, so every round declares its own set — never one declaration amended across rounds. Re-entering Phase 2 clears \`activated_lenses_recorded\` and the gate asks again. Open the decision with this line, keeping the tokens \`LENTES ATIVADAS\`, \`iteração N\` and \`V(N)\` literal even though the rest may be in English — an external analysis reads them, and a declaration it cannot date or version is one it has to discard:
+
+\`\`\`
+LENTES ATIVADAS — iteração 2, contra V(2). Universais (7, sempre): ...
+Condicionais ATIVADAS (5): ... NÃO ativadas, com justificativa: ...
+\`\`\`
+
+The version is the architecture you have in front of you: iteration N critiques \`## V(N)\` in \`specs/technical/architecture.md\`. Without it the version has to be inferred from timestamps, and "was this estimated against V(1) or V(final)?" becomes unanswerable.
+
+**Activation is by PROJECT SIGNAL, and only that.** That another lens seems to cover the same failure class is NOT a reason to skip one — absence of findings is already a valid result, and deciding in advance that two lenses overlap is the conclusion, not the premise. Lenses that overlap never running together makes the overlap unobservable by construction. Concretely: do not skip Mechanical Engineering because Resilience "already covers tolerance to input variation". Activate on the signal, run both, and let the matrix show whether they found the same defect.
+
+Each non-activated lens still needs its own individual justification — the text of those justifications is evidence, so "not applicable" alone is not a justification.
+
 ### Protocol per lens:
 1. Apply central question to EACH module
 2. Classify findings: 🔴 Critical (blocks) | 🟡 Important (degrades) | 🟢 Suggestion
@@ -449,16 +463,24 @@ One row per finding: id | module | lens | severity | description. Every module �
 - Document concentration patterns with record_decision().
 
 ### PERSIST IT AS A FINDINGS TABLE (MANDATORY):
-Write \`specs/design/coverage-matrix.md\` as one row per finding, not as a grid of severities:
+Write \`specs/design/coverage-matrix.md\` as one row per finding, not as a grid of severities. Each round of the loop gets its own SECTION HEADING, and appends below the previous round rather than replacing it:
 
 \`\`\`
+## Iteração 2 — V(2)
+
 | id | module | lens | severity | description |
 |----|--------|------|----------|-------------|
 | P-01 | auth | Security | 🔴 | password reaches the log on failed login |
 | P-02 | store | Assumptions | 🟡 | assumes the schema never changes; duplica: P-05 |
 \`\`\`
 
+**The heading is mandatory, and the token \`Iteração N\` is literal** — keep that spelling even in an otherwise English file. Omit it and every finding in the file silently collapses into iteration 1, which is worse than an error: nothing reports it. Add the \`— V(N)\` to tie the round to the architecture version it critiqued. It must be a heading and not a sixth column: a column before the id would break the row gate, the frozen finding format, and every fixture written against them.
+
 Each finding gets its own id. Where two findings overlap, say so with \`duplica: <id>\` rather than merging them — the point of the matrix is telling overlap apart from orthogonality, and a severity grid destroys exactly that. A cell holding 🔴 says a lens found something; it does not say what, so Phase 3 cannot work from it.
+
+\`duplica\` applies **within a single lens too**, not just between lenses. One lens raising the same defect under two ids inflates its own exclusive contribution while the taxonomy has nothing to do with it. Two ids, one defect, same lens: mark it.
+
+**The \`module\` column takes a module name from the table in \`specs/technical/architecture.md\`, spelled the same way.** The gate checks this: for the current round, against the current \`## V(N)\` section; for earlier rounds, against any version on record — a module V(2) removed is still a legitimate target for a finding iteration 1 raised. A name that matches no version at all is a finding Phase 3 cannot route, so it blocks.
 
 **The \`lens\` column takes the canonical lens name, in English, exactly as this guidance spells it** — \`Security\`, not "Segurança" or "SEG". The name is the join key: matrices from different projects only aggregate if the lens is written the same way in all of them.
 
