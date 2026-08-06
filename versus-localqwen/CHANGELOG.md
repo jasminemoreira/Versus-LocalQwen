@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.7.1] - 2026-08-06
+
+Removes item 6 of `RO3/CORRECOES-EXTENSAO.md`, which the batch decided to keep
+out of the extension. Items 1, 2, 3, 4, 5 and 7 are unchanged.
+
+### Removed
+
+- **The cross gate `matrix.module ⊆ architecture.modules`.** A finding may again
+  name any module; whether that name is traceable is checked by the downstream
+  analysis, against the architecture version of the round that raised it. Gone
+  with it: `moduleTraceabilityEvidence` in the engine, and
+  `parseArchitectureVersions` / `parseModuleTable` / `normalizeModule` from
+  `state/artifacts.ts`, which nothing else used.
+
+### Changed
+
+- **What survives is the iteration heading.** `matrixRoundEvidence` still
+  requires a `## Iteração N` section for the round in progress once the loop is
+  past round 1 — that is item 5, not item 6, and its failure mode is different: a
+  missing heading does not produce a wrong name, it collapses every finding in
+  the file into iteration 1 with nothing reported.
+- **Phase 2's guidance no longer promises a check that is not there.** It still
+  says the `module` column takes a name from the architecture table, spelled the
+  same way and taken from the version that round critiqued, but now says plainly
+  that nothing verifies the spelling.
+
 ## [0.7.0] - 2026-08-06
 
 Applies `RO3/CORRECOES-EXTENSAO.md` — the seven corrections the RO3 analysis

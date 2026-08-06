@@ -480,7 +480,7 @@ Each finding gets its own id. Where two findings overlap, say so with \`duplica:
 
 \`duplica\` applies **within a single lens too**, not just between lenses. One lens raising the same defect under two ids inflates its own exclusive contribution while the taxonomy has nothing to do with it. Two ids, one defect, same lens: mark it.
 
-**The \`module\` column takes a module name from the table in \`specs/technical/architecture.md\`, spelled the same way.** The gate checks this: for the current round, against the current \`## V(N)\` section; for earlier rounds, against any version on record — a module V(2) removed is still a legitimate target for a finding iteration 1 raised. A name that matches no version at all is a finding Phase 3 cannot route, so it blocks.
+**The \`module\` column takes a module name from the table in \`specs/technical/architecture.md\`, spelled the same way** — the name is what ties a finding to a design, and Phase 3 routes by it. Use the version this round critiqued: a module that \`## V(2)\` removed is still the right name for a finding iteration 1 raised against \`## V(1)\`. Nothing here checks the spelling for you, so a name invented in the matrix is a finding no one can route back.
 
 **The \`lens\` column takes the canonical lens name, in English, exactly as this guidance spells it** — \`Security\`, not "Segurança" or "SEG". The name is the join key: matrices from different projects only aggregate if the lens is written the same way in all of them.
 

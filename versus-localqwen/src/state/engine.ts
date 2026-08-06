@@ -20,13 +20,7 @@ import {
 } from "./types";
 
 import { isValidTransition, getExitCriteriaForPhase, CRITERION_ID_MIGRATION, LENS_DECLARATION_CRITERION } from "../rules/phases";
-import {
-  ITERATION_MARK,
-  LENS_MARKER,
-  VERSION_MARK,
-  parseArchitectureVersions,
-  parseMatrixIterations,
-} from "./artifacts";
+import { ITERATION_MARK, LENS_MARKER, VERSION_MARK, parseMatrixIterations } from "./artifacts";
 import {
   SafeguardResult,
   validateSafeguard,
@@ -570,7 +564,7 @@ export class StateEngine {
     }
     if (phase === 2) {
       out.push(...this.lensDeclarationEvidence());
-      out.push(...this.moduleTraceabilityEvidence());
+      out.push(...this.matrixRoundEvidence());
     }
     return out;
   }
@@ -630,66 +624,32 @@ export class StateEngine {
   }
 
   /**
-   * Every module a finding names must be a module some architecture version
-   * declared. The check is deliberately asymmetric across rounds: the current
-   * round is held to the CURRENT version, while earlier rounds are allowed any
-   * version that ever existed. A design that dropped a module between V(1) and
-   * V(2) is the normal case, not the exception, and iteration 1's findings still
-   * point at it legitimately — a gate that forgot this would block every project
-   * whose architecture actually changed.
+   * Past round 1 the matrix must carry a heading for the round in progress.
+   * Without it every finding in the file collapses into iteration 1 and nothing
+   * reports it — a silent wrong answer, not an error. In round 1 that default is
+   * already correct, so an absent heading costs nothing and is not asked for.
+   *
+   * This does NOT check that the modules a finding names exist in the
+   * architecture table; whether a name is traceable stays with the downstream
+   * analysis, which validates it against the version of the round that raised it.
    */
-  private moduleTraceabilityEvidence(): string[] {
-    const archText = this.readArtifact("technical/architecture.md");
+  private matrixRoundEvidence(): string[] {
     const matrixText = this.readArtifact("design/coverage-matrix.md");
-    if (!archText || !matrixText) return [];
+    if (!matrixText) return [];
 
-    const versions = parseArchitectureVersions(archText);
-    const iterations = parseMatrixIterations(matrixText);
-    if (versions.length === 0 || iterations.length === 0) return [];
-
-    const current = new Set(versions[versions.length - 1].modules);
-    const everDeclared = new Set(versions.flatMap((v) => v.modules));
-    const out: string[] = [];
-
-    /**
-     * Which section is this round. Past round 1 the heading is required, because
-     * without it every finding in the file collapses into iteration 1 and
-     * nothing reports it — a silent wrong answer, not an error. In round 1 the
-     * default is already right, so an absent heading costs nothing.
-     */
     const round = this.state?.currentIteration ?? 1;
-    let currentIdx = iterations.findIndex((it) => it.iteration === round);
-    if (currentIdx === -1) {
-      if (round > 1) {
-        out.push(
-          `[Phase 2] coverage_matrix: specs/design/coverage-matrix.md has no section for iteration ` +
-          `${round}. Append '## Iteração ${round} — V(${round})' above this round's rows, keeping ` +
-          `the previous rounds below it — the token 'Iteração ${round}' is literal. Without the ` +
-          `heading every finding in the file reads as iteration 1, and no one is told.`
-        );
-      }
-      currentIdx = iterations.length - 1;
-    }
+    if (round <= 1) return [];
 
-    iterations.forEach((it, idx) => {
-      const isCurrentRound = idx === currentIdx;
-      const allowed = isCurrentRound ? current : everDeclared;
-      const unknown = it.modules.filter((m) => !allowed.has(m));
-      if (unknown.length === 0) return;
+    const iterations = parseMatrixIterations(matrixText);
+    if (iterations.length === 0) return [];
+    if (iterations.some((it) => it.iteration === round)) return [];
 
-      const where = it.iteration === null ? "the matrix" : `iteration ${it.iteration}`;
-      const against = isCurrentRound
-        ? `the current architecture version${versions[versions.length - 1].version !== null ? ` V(${versions[versions.length - 1].version})` : ""}`
-        : "any architecture version on record";
-      out.push(
-        `[Phase 2] coverage_matrix: ${where} names module(s) ${unknown.map((m) => `'${m}'`).join(", ")} ` +
-        `that ${against} does not declare. Known modules: ${[...allowed].join(", ")}. Either use the ` +
-        `name from the module table in specs/technical/architecture.md, or add the module there — a ` +
-        `finding against a module no artifact records is a finding Phase 3 cannot route.`
-      );
-    });
-
-    return out;
+    return [
+      `[Phase 2] coverage_matrix: specs/design/coverage-matrix.md has no section for iteration ` +
+      `${round}. Append '## Iteração ${round} — V(${round})' above this round's rows, keeping ` +
+      `the previous rounds below it — the token 'Iteração ${round}' is literal. Without the ` +
+      `heading every finding in the file reads as iteration 1, and no one is told.`,
+    ];
   }
 
   // --- Loop Counter ---

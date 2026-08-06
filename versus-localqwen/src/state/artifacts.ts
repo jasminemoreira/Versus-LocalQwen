@@ -19,28 +19,12 @@ export const ITERATION_MARK = /itera[cç][aã]o\s*(\d+)|iteration\s*(\d+)/i;
 /** The architecture version a declaration or section was written against. */
 export const VERSION_MARK = /V\s*\(?(\d+)\)?/i;
 
-/** A row whose first cell is a module id: the architecture table. */
-const MODULE_ROW = /^\s*\|\s*(M-\d+)\s*\|([^|]*)\|/;
-
 /** A row whose first cell is a finding id: the coverage matrix. `M-` is a module. */
-const FINDING_ROW = /^\s*\|\s*((?!M-)[A-Za-z]{1,4}-\d+)\s*\|([^|]*)\|/;
-
-/** Module names are compared as written, minus the markup a table picks up. */
-export function normalizeModule(name: string): string {
-  return name.replace(/[`*_]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-export interface ArchitectureVersion {
-  /** null when the doc carries a single unversioned table (the first pass). */
-  version: number | null;
-  modules: string[];
-}
+const FINDING_ROW = /^\s*\|\s*((?!M-)[A-Za-z]{1,4}-\d+)\s*\|/;
 
 export interface MatrixIteration {
   /** null when the matrix carries no iteration heading at all. */
   iteration: number | null;
-  /** Module names as cited by the findings, normalized. */
-  modules: string[];
   /** Finding ids, in file order. */
   ids: string[];
 }
@@ -64,31 +48,8 @@ function sections(text: string, heading: RegExp): Array<{ n: number | null; body
   return out;
 }
 
-/** Module names declared in a `| M-NN | name | … |` table. */
-export function parseModuleTable(text: string): string[] {
-  const out: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    const m = MODULE_ROW.exec(line);
-    if (m) out.push(normalizeModule(m[2]));
-  }
-  return [...new Set(out)].filter(Boolean);
-}
-
 /**
- * The architecture doc as a list of versions, oldest first. Phase 3 appends a
- * `## V(N+1)` section per round rather than overwriting, so the last section is
- * the current design and the earlier ones are what earlier findings named.
- */
-export function parseArchitectureVersions(text: string): ArchitectureVersion[] {
-  const parts = sections(text, /^\s*#{1,6}\s*V\s*\(?(\d+)\)?\b/i);
-  const out = parts
-    .map((p) => ({ version: p.n, modules: parseModuleTable(p.body) }))
-    .filter((v) => v.modules.length > 0);
-  return out;
-}
-
-/**
- * The coverage matrix as a list of iterations, oldest first. A matrix with no
+ * The coverage matrix as a list of rounds, oldest first. A matrix with no
  * `## Iteração N` heading yields a single section with `iteration: null` — which
  * is exactly the silent collapse the heading exists to prevent, so callers that
  * care about the round should treat null as "unknown", not as 1.
@@ -97,17 +58,13 @@ export function parseMatrixIterations(text: string): MatrixIteration[] {
   const parts = sections(text, /^\s*#{1,6}\s*(?:itera[cç][aã]o|iteration)\s*(\d+)/i);
   const out: MatrixIteration[] = [];
   for (const p of parts) {
-    const modules: string[] = [];
     const ids: string[] = [];
     for (const line of p.body.split(/\r?\n/)) {
       const m = FINDING_ROW.exec(line);
-      if (!m) continue;
-      ids.push(m[1]);
-      const mod = normalizeModule(m[2]);
-      if (mod) modules.push(mod);
+      if (m) ids.push(m[1]);
     }
     if (ids.length > 0) {
-      out.push({ iteration: p.n, modules: [...new Set(modules)], ids });
+      out.push({ iteration: p.n, ids });
     }
   }
   return out;
