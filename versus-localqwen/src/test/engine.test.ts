@@ -1154,9 +1154,18 @@ test("re-entering Phase 2 opens a new round and asks for its own declaration", (
     assert.ok(e.advancePhase(2).ok, "the loop back is always allowed");
     assert.strictEqual(e.getPhaseState()!.currentIteration, 2, "3→2 opens round 2");
 
+    // The whole round resets, not just the declaration: a new critique of a new
+    // architecture re-produces the findings, the criticals and the concentration
+    // too, and leaving those marked let V(1)'s critique stand in for V(2).
     const criteria = e.getExitCriteriaWithDefs(2);
-    const lens = criteria.find((c) => c.criterion === "activated_lenses_recorded");
-    assert.strictEqual(lens!.met, false, "the previous declaration looked at V(1)");
+    assert.ok(criteria.length >= 5, "Phase 2 has more than one criterion to reset");
+    assert.deepStrictEqual(
+      criteria.filter((c) => c.met).map((c) => c.criterion),
+      [],
+      "every Phase 2 criterion is owed again"
+    );
+    // Nothing else moves — Phase 3's criteria stay as the round left them.
+    assert.ok(e.getExitCriteriaWithDefs(3).every((c) => c.met), "other phases are untouched");
 
     // Round 1's declaration must not satisfy round 2 — that is the accumulation
     // this whole mechanism exists to prevent.

@@ -19,7 +19,7 @@ import {
   specItemValue,
 } from "./types";
 
-import { isValidTransition, getExitCriteriaForPhase, CRITERION_ID_MIGRATION, LENS_DECLARATION_CRITERION } from "../rules/phases";
+import { isValidTransition, getExitCriteriaForPhase, CRITERION_ID_MIGRATION } from "../rules/phases";
 import { ITERATION_MARK, LENS_MARKER, VERSION_MARK, parseMatrixIterations } from "./artifacts";
 import {
   SafeguardResult,
@@ -284,11 +284,13 @@ export class StateEngine {
       this.state.currentIteration = 1;
     }
 
-    // Re-entering Phase 2 opens a new critique of a DIFFERENT architecture, so
-    // the lens set has to be declared again against that version — the previous
-    // declaration was made looking at V(N-1).
+    // Re-entering Phase 2 through the loop is a FRESH critique of the new
+    // architecture version V(N+1): lenses re-declared, findings re-produced,
+    // criticals and concentration re-analysed. Every Phase 2 criterion resets,
+    // not just the lens one — leaving the other four marked let the critique of
+    // V(1) stand in for V(N+1), and showed the phase as "4/5 done" on re-entry.
     if (targetPhase === 2 && from === 3) {
-      this.resetLensDeclaration();
+      this.resetPhase2Criteria();
     }
 
     this.state.loopCounter = { pattern: "", count: 0, firstSeen: "", lastSeen: "" };
@@ -298,15 +300,19 @@ export class StateEngine {
     return { ok: true, value: undefined };
   }
 
-  /** Clears activated_lenses_recorded so the gate asks for a fresh declaration. */
-  private resetLensDeclaration(): void {
+  /**
+   * Unmarks every Phase 2 exit criterion, so a new round has to earn all of them
+   * again. Only the booleans reset — the artifacts stay on disk, which is what
+   * lets the new round append to the matrix rather than start it over. Criteria
+   * of other phases are untouched.
+   */
+  private resetPhase2Criteria(): void {
     if (!this.state) return;
-    const c = this.state.exitCriteria.find(
-      (e) => e.phase === 2 && e.criterion === LENS_DECLARATION_CRITERION
-    );
-    if (c) {
-      c.met = false;
-      c.details = undefined;
+    for (const ec of this.state.exitCriteria) {
+      if (ec.phase === 2) {
+        ec.met = false;
+        ec.details = undefined;
+      }
     }
   }
 
@@ -319,10 +325,10 @@ export class StateEngine {
     }
 
     this.state.currentIteration += 1;
-    // Same reason as re-entry through the loop: a new round of Phase 2 critiques
-    // a new architecture, so its lens set is a new declaration.
+    // Same reason as re-entry through the loop: a new round of Phase 2 is a new
+    // critique, so it owes every criterion again, not just the declaration.
     if (phase === 2) {
-      this.resetLensDeclaration();
+      this.resetPhase2Criteria();
     }
     this.save();
 

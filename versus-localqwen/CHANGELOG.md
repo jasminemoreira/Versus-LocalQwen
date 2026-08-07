@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.7.2] - 2026-08-06
+
+Standalone patch `APLICAR-RESET-COMPLETO-FASE2-NO-LOOP-NOS-OUTROS-BUILDS.md`,
+from Versus for Claude 0.12.8.
+
+### Fixed
+
+- **Looping back to Phase 2 now clears all five exit criteria, not just the lens
+  one.** Re-entry is a fresh critique of V(N+1): the matrix is re-produced and
+  the criticals and concentration re-analysed. Resetting only
+  `activated_lenses_recorded` left the other four marked from iteration 1, so the
+  gate accepted the critique of V(1) as the critique of V(N+1), and the sidebar
+  showed Phase 2 as "4/5 done" the moment the round began.
+
+  Only the booleans reset; the artifacts stay on disk, which is what lets the new
+  round append its `## Iteração N` section rather than start the file over. No
+  criterion of any other phase is touched — verified on Phase 3 in the same run.
+
+### Changed
+
+- `start_iteration(2)` resets the same way, for the same reason: a new round
+  within Phase 2 is a new critique, so it owes every criterion again. The spec
+  covers only the loop-back, but leaving the two paths inconsistent would mean
+  the same event cleared different things depending on how it was reached.
+
 ## [0.7.1] - 2026-08-06
 
 Removes item 6 of `RO3/CORRECOES-EXTENSAO.md`, which the batch decided to keep
