@@ -1164,8 +1164,15 @@ test("re-entering Phase 2 opens a new round and asks for its own declaration", (
       [],
       "every Phase 2 criterion is owed again"
     );
-    // Nothing else moves — Phase 3's criteria stay as the round left them.
-    assert.ok(e.getExitCriteriaWithDefs(3).every((c) => c.met), "other phases are untouched");
+    // Phase 3 resets too: it will be redone against the new design, and its
+    // criticals_addressed from round 1 answered round 1's criticals.
+    assert.deepStrictEqual(
+      e.getExitCriteriaWithDefs(3).filter((c) => c.met).map((c) => c.criterion),
+      [],
+      "the loop is symmetric — both phases of it are redone"
+    );
+    // Phases outside the loop are left alone.
+    assert.ok(e.getExitCriteriaWithDefs(1).every((c) => c.met), "Phase 1 is not in the loop");
 
     // Round 1's declaration must not satisfy round 2 — that is the accumulation
     // this whole mechanism exists to prevent.
@@ -1195,6 +1202,44 @@ test("re-entering Phase 2 opens a new round and asks for its own declaration", (
       "| RES-01 | store | Resilience | 🟡 | a failed write leaves the counter behind |",
     ].join("\n"));
     assert.ok(e.advancePhase(3).ok);
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("after a loop, Phase 4 waits for Phase 3 to be answered again", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    // 2→3 · 3→2 · 2→3, then the gate to Phase 4.
+    markAll(e, 2);
+    declareLenses(e, 1);
+    writeCoverageMatrix(tmp);
+    assert.ok(e.advancePhase(3).ok);
+    markAll(e, 3);
+    assert.ok(e.advancePhase(2).ok);
+
+    markAll(e, 2);
+    declareLenses(e, 2);
+    writeCoverageMatrix(tmp, [
+      FINDINGS_TABLE,
+      "",
+      "## Iteração 2 — V(2)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| RES-01 | store | Resilience | 🟡 | a failed write leaves the counter behind |",
+    ].join("\n"));
+    assert.ok(e.advancePhase(3).ok);
+
+    // Round 1's stamp answered round 1's criticals, so it cannot open Phase 4.
+    const blocked = e.advancePhase(4);
+    assert.ok(!blocked.ok, "the Phase 3 criteria were earned before the second critique");
+    if (!blocked.ok) {
+      assert.ok(blocked.error.missingCriteria.some((m) => m.includes("criticals_addressed")));
+    }
+
+    markAll(e, 3);
+    assert.ok(e.advancePhase(4).ok, "re-answering Phase 3 opens the gate");
   } finally {
     cleanTempWorkspace(tmp);
   }

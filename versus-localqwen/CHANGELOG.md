@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.7.4] - 2026-08-06
+
+Standalone patch `APLICAR-RESET-SIMETRICO-DO-LACO-NOS-OUTROS-BUILDS.md`, from
+Versus for Claude 0.13.1.
+
+### Fixed
+
+- **The loop back to Phase 2 now resets Phase 3's criteria as well.** 0.7.2 reset
+  only Phase 2, so `criticals_addressed`, `important_decided`,
+  `scope_preserved` and `architecture_simplified` survived the first pass. A
+  project that looped — `2→3 · 3→2 · 2→3 · 3→4` — cleared the 3→4 gate with
+  iteration 1's stamp, which answered iteration 1's findings. `criticals_addressed`
+  from the first pass means nobody confirmed the second critique's criticals.
+
+  The block is now the general form: a backward transition resets every phase from
+  the target up to the one being left, which for 3→2 is phases 2 and 3. Phases
+  outside the loop are untouched — verified on Phase 1 in the same run.
+
+### Notes
+
+- `start_iteration(2)` still resets Phase 2 only, and correctly so: it does not
+  change phase, so Phase 3 was never redone. The spec confirms no third case
+  exists — the real redo always goes through `advancePhase`, where the reset now
+  lives.
+- Data consequence for the batch, carried from the spec: any project already run
+  that looped and passed 3→4 under the old behaviour holds an iteration 1 stamp on
+  Phase 3. Whether to discard it is the batch's call (upstream discarded T21).
+
 ## [0.7.3] - 2026-08-06
 
 Standalone patch `APLICAR-GATILHOS-E-GATE-CRUZADO-NOS-OUTROS-BUILDS.md`, from

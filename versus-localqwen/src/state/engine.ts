@@ -287,13 +287,14 @@ export class StateEngine {
       this.state.currentIteration = 1;
     }
 
-    // Re-entering Phase 2 through the loop is a FRESH critique of the new
-    // architecture version V(N+1): lenses re-declared, findings re-produced,
-    // criticals and concentration re-analysed. Every Phase 2 criterion resets,
-    // not just the lens one — leaving the other four marked let the critique of
-    // V(1) stand in for V(N+1), and showed the phase as "4/5 done" on re-entry.
-    if (targetPhase === 2 && from === 3) {
-      this.resetPhase2Criteria();
+    // Backward transition inside the 2↔3 loop (only 3→2 today): every phase from
+    // the target up to the one being left will be REDONE against the new design,
+    // so reset all their exit criteria — Phase 2 AND Phase 3. A stamp from the
+    // previous pass answered the OLD critique; it must not satisfy the gate for
+    // the new one. Phase 3's criticals_addressed from iteration 1 says nobody
+    // confirmed iteration 2's criticals.
+    if (targetPhase < from) {
+      this.resetCriteria(targetPhase, from);
     }
 
     this.state.loopCounter = { pattern: "", count: 0, firstSeen: "", lastSeen: "" };
@@ -304,15 +305,14 @@ export class StateEngine {
   }
 
   /**
-   * Unmarks every Phase 2 exit criterion, so a new round has to earn all of them
-   * again. Only the booleans reset — the artifacts stay on disk, which is what
-   * lets the new round append to the matrix rather than start it over. Criteria
-   * of other phases are untouched.
+   * Unmarks the exit criteria of phases `lo..hi` inclusive, so the work has to be
+   * earned again. Only the booleans reset — the artifacts stay on disk, which is
+   * what lets a new round append to the matrix rather than start it over.
    */
-  private resetPhase2Criteria(): void {
+  private resetCriteria(lo: number, hi: number): void {
     if (!this.state) return;
     for (const ec of this.state.exitCriteria) {
-      if (ec.phase === 2) {
+      if (ec.phase >= lo && ec.phase <= hi) {
         ec.met = false;
         ec.details = undefined;
       }
@@ -329,9 +329,10 @@ export class StateEngine {
 
     this.state.currentIteration += 1;
     // Same reason as re-entry through the loop: a new round of Phase 2 is a new
-    // critique, so it owes every criterion again, not just the declaration.
+    // critique, so it owes every criterion again, not just the declaration. Only
+    // Phase 2 — this call does not change phase, so Phase 3 was never redone.
     if (phase === 2) {
-      this.resetPhase2Criteria();
+      this.resetCriteria(2, 2);
     }
     this.save();
 
