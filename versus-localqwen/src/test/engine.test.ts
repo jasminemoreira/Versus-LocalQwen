@@ -1200,14 +1200,7 @@ test("re-entering Phase 2 opens a new round and asks for its own declaration", (
   }
 });
 
-/**
- * The matrix rows still name modules, and the downstream analysis validates
- * those names against the architecture version of the round that raised them.
- * The engine deliberately does not: a gate here would have to know which
- * version each round critiqued, and getting that wrong blocks every project
- * whose design evolved — which is the normal case, not the exception.
- */
-test("a module the architecture never declared is not the engine's call", () => {
+test("a finding citing a module no version declares is drift, and blocks", () => {
   const { engine: e, tmp } = atPhase2();
   try {
     markAll(e, 2);
@@ -1217,9 +1210,51 @@ test("a module the architecture never declared is not the engine's call", () => 
       "",
       "| id | module | lens | severity | description |",
       "|----|--------|------|----------|-------------|",
-      "| P-01 | quota-limiter | Security | 🔴 | a module no version of the design has |",
+      "| P-01 | quota-limiter | Security | 🔴 | the module is called rate-limiter |",
     ].join("\n"));
-    assert.ok(e.advancePhase(3).ok, "the engine gates the shape, not the vocabulary");
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok, "a name in no version of the architecture is drift");
+    if (!blocked.ok) {
+      assert.ok(
+        blocked.error.missingCriteria.some((m) => m.includes("quota-limiter")),
+        "the block must name the module that drifted"
+      );
+    }
+
+    writeCoverageMatrix(tmp);
+    assert.ok(e.advancePhase(3).ok, "the Phase 1 name unblocks it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a module removed between versions is tolerated, not drift", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    // rate-limiter exists in V(1) and is gone from V(2). Iteration 1 raised a
+    // finding against it, which stays legitimate — checking only the last
+    // version would block every project whose design actually evolved.
+    writeArchitectureDoc(tmp, [
+      "## V(1)",
+      "",
+      MODULE_TABLE,
+      "",
+      "## V(2)",
+      "",
+      "| id | module | responsibility | interface | depends-on |",
+      "|------|-------|--------------------|-----------------------|---|",
+      "| M-01 | store | counters and quota | get(key) / allow(key) | — |",
+    ].join("\n"));
+    markAll(e, 2);
+    declareLenses(e, 1);
+    writeCoverageMatrix(tmp, [
+      "## Iteração 1 — V(1)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| P-01 | rate-limiter | Security | 🔴 | raised against V(1), where it existed |",
+    ].join("\n"));
+    assert.ok(e.advancePhase(3).ok, "the union of versions is what counts");
   } finally {
     cleanTempWorkspace(tmp);
   }
@@ -1254,6 +1289,16 @@ test("a spec written before the stamps still reads", () => {
   assert.strictEqual(stack.length, 2, "the bare string is the same entry, not a new one");
   assert.strictEqual(stack[0], "TypeScript", "old entries are left as they were");
   assert.strictEqual((stack[1] as any).value, "Node 18+");
+});
+
+test("the three widened lens triggers are the ones in the table", () => {
+  // Each of these activated in 0/7 pilots because the trigger was narrower than
+  // the lens's own central question, or measured something else entirely.
+  const g = getCompleteGuidance();
+  assert.ok(g.includes("Any surface a PERSON operates"), "UI/UX covers a CLI");
+  assert.ok(g.includes("whose cost grows with use"), "Sustainability is not an AI/ML checklist");
+  assert.ok(g.includes("This is a SYSTEM property"), "Governance is not only multi-team");
+  assert.ok(!g.includes("| User-facing interface |"), "the narrow trigger is gone");
 });
 
 test("the guidance states the contract the analysis reads", () => {

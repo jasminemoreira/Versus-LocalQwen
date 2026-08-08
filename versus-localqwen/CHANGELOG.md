@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.7.3] - 2026-08-06
+
+Standalone patch `APLICAR-GATILHOS-E-GATE-CRUZADO-NOS-OUTROS-BUILDS.md`, from
+Versus for Claude 0.13.0 (round R2). Two independent changes.
+
+### Changed
+
+- **Three conditional-lens triggers widened (Part A, guidance only).** Each was
+  activating in 0/7 pilots because the trigger was narrower than the lens's own
+  central question, or measured something else:
+  - **UI/UX** — any surface a person operates, a CLI or operational tooling
+    included, not only graphical end-user interfaces.
+  - **Sustainability / Proportionality** — the system decides, allocates or
+    consumes a resource whose cost grows with use; AI/ML and high-volume data are
+    examples, not the test. Apply the central question, do not match examples.
+  - **Governance / Accountability** — the system records or decides something
+    someone will later have to audit, attribute or answer for. It is a SYSTEM
+    property, so a single-operator project activates it when the system has it.
+
+  Protocol note, recorded here for the trail: the Governance change alters the
+  taxonomy the paper defends. The batch now measures the corrected taxonomy, not
+  the published one.
+
+### Added
+
+- **Cross gate matrix × architecture, reinstated (Part B).** On 2→3, every module
+  a finding row cites must appear in the module table of
+  `specs/technical/architecture.md` — checked against the **union of all
+  `## V(N)` versions**. A module removed between versions is tolerated, since the
+  findings raised against it were raised while it existed; a name in no version
+  at all is drift and blocks, naming the module. In the discarded batch 11
+  findings pointed at modules that never existed, silently.
+
+  This is the check removed in 0.7.1 at the batch's request, now coming back from
+  upstream with union semantics — simpler than the per-round asymmetry 0.7.0 had,
+  and it removes the need to know which version each round critiqued.
+
+### Notes
+
+- The gate skips when either artifact is absent or has no rows, so it cannot turn
+  a missing-artifact case into a confusing drift message.
+- Phase 2's guidance again states that the module column is checked, and against
+  which versions — 0.7.1 had softened it to "nothing verifies the spelling",
+  which would now be false.
+
 ## [0.7.2] - 2026-08-06
 
 Standalone patch `APLICAR-RESET-COMPLETO-FASE2-NO-LOOP-NOS-OUTROS-BUILDS.md`,
