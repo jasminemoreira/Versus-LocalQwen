@@ -23,7 +23,13 @@ import {
 } from "../ollama/client";
 import { handleGetPhaseGuidance } from "../mcp/tools/guidance-tools";
 import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
-import { CONDITIONAL_LENSES, UNIVERSAL_LENSES, canonicalLens } from "../rules/lenses";
+import {
+  CONDITIONAL_LENSES,
+  CONDITIONAL_LENS_DEFS,
+  UNIVERSAL_LENSES,
+  UNIVERSAL_LENS_DEFS,
+  canonicalLens,
+} from "../rules/lenses";
 
 function createTempWorkspace(): string {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "versus-test-"));
@@ -1619,6 +1625,20 @@ test("a conditional lens no round ever declared blocks", () => {
   } finally {
     cleanTempWorkspace(tmp);
   }
+});
+
+test("the Phase 2 lens tables render from lenses.ts", () => {
+  // Moving the table from hand-written markdown to data must not change one byte
+  // of what the model reads — that is the whole point of the consolidation.
+  const g = getCompleteGuidance();
+  assert.ok(g.includes("| Lens | Central Question | Exclusive Failure Class | Activate when... |"));
+  for (const l of [...UNIVERSAL_LENS_DEFS, ...CONDITIONAL_LENS_DEFS]) {
+    assert.ok(g.includes(`| ${l.name} | ${l.question} |`), `${l.name} renders its question`);
+  }
+  // The three triggers widened in 0.7.3 come from the defs now, not from prose.
+  assert.ok(g.includes("Any surface a PERSON operates"));
+  assert.ok(g.includes("whose cost grows with use"));
+  assert.ok(g.includes("This is a SYSTEM property"));
 });
 
 test("the 19 canonical names are the ones the guidance teaches", () => {

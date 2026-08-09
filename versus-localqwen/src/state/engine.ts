@@ -20,7 +20,7 @@ import {
   LensActivation,
 } from "./types";
 
-import { isValidTransition, getExitCriteriaForPhase, CRITERION_ID_MIGRATION } from "../rules/phases";
+import { isValidTransition, getExitCriteriaForPhase } from "../rules/phases";
 import {
   ITERATION_MARK,
   LENS_MARKER,
@@ -131,34 +131,12 @@ export class StateEngine {
       if (fs.existsSync(this.statePath)) {
         const raw = fs.readFileSync(this.statePath, "utf-8");
         this.state = JSON.parse(raw) as PhaseState;
-        if (this.migrateCriterionIds()) {
-          this.save();
-        }
         return this.state;
       }
     } catch (err) {
       // state.json corrupted — return null
     }
     return null;
-  }
-
-  /** Migrates Portuguese criterion IDs to English. Returns true if any were migrated. */
-  private migrateCriterionIds(): boolean {
-    if (!this.state) return false;
-    let migrated = false;
-    for (const ec of this.state.exitCriteria) {
-      const newId = CRITERION_ID_MIGRATION[ec.criterion];
-      if (newId) {
-        ec.criterion = newId;
-        migrated = true;
-      }
-    }
-    for (const h of this.state.history) {
-      if (h.criteriaMet) {
-        h.criteriaMet = h.criteriaMet.map((c) => CRITERION_ID_MIGRATION[c] || c);
-      }
-    }
-    return migrated;
   }
 
   private save(): void {

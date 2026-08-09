@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.8.1] - 2026-08-09
+
+Standalone patch `APLICAR-FAXINA-v0.14.1-LENTES-FONTE-UNICA-E-MIGRACAO-PT-NOS-OUTROS-BUILDS.md`,
+from Versus for Claude 0.14.1. **Non-behavioural**: the injected guidance is
+byte-for-byte identical and no gate changed. Maintenance only.
+
+### Changed
+
+- **The lens definitions are a single source (Block A).** Each lens's central
+  question, failure class and trigger lived as hand-written markdown inside the
+  Phase 2 guidance — a second copy of names `lenses.ts` already owned, and exactly
+  where a trigger edit could drift from what the gate validates. `LensDef` now
+  holds the whole definition, the guidance renders its three tables from it, and
+  `UNIVERSAL_LENSES` / `CONDITIONAL_LENSES` are derived rather than typed out
+  again.
+
+  This build splits the conditional lenses into two tables — 8 situational and 4
+  Domain Transfer Lenses under their own heading — so the defs carry a `group`
+  field and render as two tables, which is what keeps the output identical.
+
+  The defs were extracted from the existing table programmatically rather than
+  retyped, and the rendered guidance was diffed against the previous build: no
+  difference, 68963 bytes either way.
+
+### Removed
+
+- **The Portuguese→English criterion id migration (Block B).** The shim renamed
+  ids in `load()` for a `state.json` written before 0.3.6 and never reopened
+  since. Removed from `engine.ts` (import, `load()` call, and the
+  `migrateCriterionIds` method), `phases.ts` (the map), and `sidebar.ts` (the
+  import and the doubled lookup predicate).
+
+  Evidence for this build, per the spec's instruction not to remove blind: the
+  scan over all 36 live `.versus/state.json` files under `INDT/` found 5 with
+  Portuguese ids, all under `lixo/jogos/` — the same discardable set upstream
+  found. Accepted consequence: a pre-rename project reopened after this shows its
+  criteria as unmet.
+
+### Notes
+
+- No batch project needs discarding — this touches nothing the RO3 measures.
+
 ## [0.8.0] - 2026-08-09
 
 Standalone patch `APLICAR-LENTES-ESTRUTURADAS-E-GATE-DE-LENTE-NOS-OUTROS-BUILDS.md`,

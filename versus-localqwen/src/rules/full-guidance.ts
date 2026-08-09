@@ -1,3 +1,10 @@
+import {
+  DTL_LENS_DEFS,
+  SITUATIONAL_LENS_DEFS,
+  UNIVERSAL_LENS_DEFS,
+  renderLensTable,
+} from "./lenses";
+
 import { LOOP_FAILURE_THRESHOLD } from "./safeguards";
 
 // Detailed behavioral instructions per phase of Iterative Convergence v3.6
@@ -399,37 +406,15 @@ const PHASE_2_GUIDANCE = `## Phase 2 — Adversarial Critique
 Different lenses see different flaws. Isolated responses may be individually correct but systemically contradictory.
 
 ### Universal Lenses (ALL always applied — low cost in planning, high risk if omitted):
-| Lens | Central Question | Exclusive Failure Class |
-|------|-----------------|------------------------|
-| Assumptions | What does this design assume as true without declaring? | Failures from hidden assumptions |
-| Architectural | Can each module be replaced, removed, or tested in isolation? | Hidden coupling, circular dependencies, SRP violation |
-| Implementability | Can I code this module in a single session with available context? | Incomplete specs, insufficient granularity |
-| Scientific | Does each value/formula/algorithm have a verifiable bibliographic reference? | Invented parameters, plausibility-based logic |
-| Security | How would an attacker exploit this with minimal effort? | Unanalyzed attack surface |
-| Performance | Where are the bottlenecks? Asymptotic behavior? | Hidden bottlenecks, degradation at scale |
-| Regulatory | Does each normative requirement have traceability to a module? | Non-compliance with applicable standards |
+${renderLensTable(UNIVERSAL_LENS_DEFS, false)}
 
 Selection principle: if removing this lens, is there a failure class that NO other lens detects? If yes → legitimate. If not → redundancy.
 
 ### Conditional Lenses (activate based on project context from ProjectSpec):
-| Lens | Central Question | Exclusive Failure Class | Activate when... |
-|------|-----------------|------------------------|------------------|
-| Resilience | What happens when an external dependency fails, responds slowly, or returns unexpected data? | Cascading failures, retry storms, partial outages | External dependencies (APIs, DBs, queues, third-party services) |
-| UI/UX | Can the user complete their task without frustration, confusion, or error? | Confusing flows, dead-end states, missing feedback, accessibility failures | Any surface a PERSON operates — including a CLI or operational tooling, not only graphical end-user interfaces |
-| Migration / Coexistence | What breaks during the transition from old to new? Is there a rollback path? | Data loss in migration, functional regression vs. legacy, impossible rollback | Replacing or modifying existing production system |
-| Sustainability / Proportionality | Is resource consumption proportionate to value delivered? Cost at 10× scale? | GPU where CPU suffices, heavy model for simple task, infinite data retention | The system decides, allocates, or consumes a resource whose cost grows with use — e.g. (but NOT only) AI/ML, high-volume data processing, elastic infrastructure. Apply the central question, do not just match the examples |
-| Ethical / Human Impact | Who is potentially harmed? Are there audit, correction, and transparency mechanisms? | Algorithmic bias, digital exclusion, automated decisions without human recourse | Automated decisions about people (scoring, classification, moderation) |
-| Process / Workflow | Are processes, state transitions, actor responsibilities, and exception paths complete? | Orphaned states, ambiguous handoffs, missing actors, happy-path bias | Multi-actor flows, state machines, or business processes |
-| Governance / Accountability | Is every action attributable? Does every data entity have a defined owner? | No data ownership, no accountability, shadow data flows | The system records or decides something someone will later need to audit, attribute, or answer for — data with distinct owners, actions that need authorship, or an obligation to account. This is a SYSTEM property: a single-operator project activates it when the system has it (not only multi-team / compliance contexts) |
-| Observability / Operability | Can degradation be detected and incidents diagnosed in production without code changes? | Opaque systems where nobody can figure out why it failed | Production systems with operational requirements |
+${renderLensTable(SITUATIONAL_LENS_DEFS, true)}
 
 **Domain Transfer Lenses (DTLs) — activate when signals are detected:**
-| Lens | Central Question | Exclusive Failure Class | Activate when... |
-|------|-----------------|------------------------|------------------|
-| Control Engineering | Where does the system generate error signal and correct? Risk of oscillation or state drift? | Systems that react to events but don't regulate state | State synchronization, runtime configuration, feedback loops, systems that must converge to a target |
-| Game Theory | Do actors have aligned incentives? Where does the system assume cooperation but may encounter strategic defection? | Architectures that collapse under adversarial/strategic behavior | Multiple independent actors, public API consumed externally, marketplace or multi-tenant systems |
-| Linguistics / Grammar | Is the interface contract unambiguous? Can two correct implementations be mutually incompatible? | Protocol ambiguity — two correct implementations that are mutually incompatible | Inter-component communication contracts, interfaces defined between independent teams |
-| Mechanical Engineering | Where are the tolerances? Does the system tolerate variation or only work at exact specification? | Rigid coupling disguised as tolerance — fails on small variations | Module maintenance, long-lived systems, technical debt, systems expected to evolve or be replaced |
+${renderLensTable(DTL_LENS_DEFS, true)}
 
 Conditional lens activation: review ProjectSpec (stack, constraints, out-of-scope) and activate applicable lenses (situational + DTLs). Record activated set with record_decision(category='architecture').
 

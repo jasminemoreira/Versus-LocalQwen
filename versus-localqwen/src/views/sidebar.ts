@@ -4,7 +4,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { PhaseState } from "../state/types";
-import { getPhaseDefinition, getExitCriteriaForPhase, CRITERION_ID_MIGRATION } from "../rules/phases";
+import { getPhaseDefinition, getExitCriteriaForPhase } from "../rules/phases";
 
 export class SidebarProvider implements vscode.TreeDataProvider<StateItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<StateItem | undefined | null>();
@@ -187,10 +187,7 @@ export class SidebarProvider implements vscode.TreeDataProvider<StateItem> {
     const defs = getExitCriteriaForPhase(phase);
 
     const matchEntry = (def: { criterion: string }) =>
-      state.exitCriteria.find(
-        (c) => c.phase === phase &&
-          (c.criterion === def.criterion || CRITERION_ID_MIGRATION[c.criterion] === def.criterion)
-      );
+      state.exitCriteria.find((c) => c.phase === phase && c.criterion === def.criterion);
 
     const children = defs.map((def) => {
       const stateEntry = matchEntry(def);
