@@ -272,7 +272,10 @@ test("advancePhase blocks without exit criteria", () => {
   const result = engine.advancePhase(1);
   assert.strictEqual(result.ok, false);
   if (!result.ok) {
-    assert.ok(result.error.missingCriteria.length > 0);
+    // Naming a criterion, not just counting: a message-assembly path that throws
+    // or interpolates undefined is invisible to a test that reads the boolean.
+    assert.ok(result.error.missingCriteria.some((m) => m.includes("[Phase 0]")));
+    assert.ok(result.error.missingCriteria.some((m) => m.includes("user_confirmed")));
   }
 });
 
@@ -286,6 +289,12 @@ test("advancePhase blocks without score 90", () => {
   }
   const result = engine.advancePhase(1);
   assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.ok(
+      result.error.missingCriteria.some((m) => m.includes("score = 75") && m.includes(">= 90")),
+      "the block must say the score it read and the one it wants"
+    );
+  }
 });
 
 test("advancePhase allows with score >= 90 and criteria", () => {
@@ -308,6 +317,14 @@ test("advancePhase blocks invalid transition (0→2)", () => {
   engine.initProject("Test", "Desc");
   const result = engine.advancePhase(2);
   assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.ok(
+      result.error.missingCriteria.some(
+        (m) => m.includes("Phase 0 to Phase 2 is not allowed") && m.includes("loop 2↔3")
+      ),
+      "the block must name both ends and what is allowed instead"
+    );
+  }
 });
 
 test("loop Phase 2↔3 allowed", () => {
@@ -354,6 +371,7 @@ test("startIteration rejects wrong phase", () => {
   engine.initProject("Test", "Desc");
   const r = engine.startIteration(1); // currently on phase 0
   assert.strictEqual(r.ok, false);
+  if (!r.ok) assert.ok(r.error.includes("Current phase is 0, not 1"), "say which phase it is on");
 });
 
 // --- Safeguards ---
@@ -951,7 +969,16 @@ test("a trivial artifact does not count as evidence", () => {
     declareLenses(engine);
     // A heading alone is the shape of a file written to satisfy a checker.
     writeCoverageMatrix(tmp, "# Coverage Matrix\n");
-    assert.ok(!engine.advancePhase(3).ok, "80 non-whitespace chars is the floor");
+    const thin = engine.advancePhase(3);
+    assert.ok(!thin.ok, "80 non-whitespace chars is the floor");
+    if (!thin.ok) {
+      assert.ok(
+        thin.error.missingCriteria.some(
+          (m) => m.includes("design/coverage-matrix.md") && m.includes("missing or")
+        ),
+        "the block must name the file and say it is empty, not just refuse"
+      );
+    }
 
     writeCoverageMatrix(tmp);
     assert.ok(engine.advancePhase(3).ok);
@@ -1008,7 +1035,16 @@ test("an echo of the module table is not a set of findings", () => {
     // Phase 1 now writes M-01 ids, and M fits [A-Za-z]{1,4}. Copying that table
     // into the matrix produced a file with zero findings that passed the gate.
     writeCoverageMatrix(tmp, MODULE_ECHO);
-    assert.ok(!engine.advancePhase(3).ok, "a matrix with no findings must not pass");
+    const echo = engine.advancePhase(3);
+    assert.ok(!echo.ok, "a matrix with no findings must not pass");
+    if (!echo.ok) {
+      assert.ok(
+        echo.error.missingCriteria.some(
+          (m) => m.includes("structured form") && m.includes("P-01 | auth")
+        ),
+        "the block must show the finding row it wants, not the module one"
+      );
+    }
 
     // The lookahead must not take Mechanical Engineering with it.
     writeCoverageMatrix(tmp, MECHANICAL_FINDING);
@@ -1059,7 +1095,11 @@ test("tests_passing needs a pass witnessed in this phase", () => {
 
     // A failing run is a witnessed run, but not a passing one.
     engine.recordTestOutcome("pytest", true);
-    assert.ok(!engine.advancePhase(7).ok, "a failure must not satisfy the gate");
+    const failed = engine.advancePhase(7);
+    assert.ok(!failed.ok, "a failure must not satisfy the gate");
+    if (!failed.ok) {
+      assert.ok(failed.error.missingCriteria.some((m) => m.includes("no passing test run was witnessed")));
+    }
 
     engine.recordTestOutcome("pytest", false);
     assert.ok(engine.advancePhase(7).ok, "a witnessed pass unblocks it");
@@ -1076,7 +1116,11 @@ test("a pass witnessed in an earlier phase does not carry forward", () => {
     (st as any).currentPhase = 6;
     engine.recordDecision(6, "scope", "moved on");
     markAll(engine, 6);
-    assert.ok(!engine.advancePhase(7).ok, "the pass belonged to Phase 5");
+    const stale = engine.advancePhase(7);
+    assert.ok(!stale.ok, "the pass belonged to Phase 5");
+    if (!stale.ok) {
+      assert.ok(stale.error.missingCriteria.some((m) => m.includes("witnessed in this phase")));
+    }
   } finally {
     cleanTempWorkspace(tmp);
   }
@@ -1446,8 +1490,15 @@ test("record_activated_lenses refuses a translation or an abbreviation", () => {
   const { engine: e, tmp } = atPhase2();
   try {
     const p = payload(["Resilience"]);
-    assert.strictEqual(record(e, ["Resiliência"], p.notActivated).success, false);
-    assert.strictEqual(record(e, ["RES"], p.notActivated).success, false);
+    const pt = record(e, ["Resiliência"], p.notActivated);
+    assert.strictEqual(pt.success, false);
+    assert.ok(pt.problems.some((x: string) => x.includes("'Resiliência' is not a lens name")),
+      "the refusal must quote what was sent");
+
+    const abbrev = record(e, ["RES"], p.notActivated);
+    assert.strictEqual(abbrev.success, false);
+    assert.ok(abbrev.problems.some((x: string) => x.includes("'RES' is not a lens name")));
+
     assert.strictEqual(record(e, ["Resilience"], p.notActivated).success, true);
   } finally {
     cleanTempWorkspace(tmp);
@@ -1674,7 +1725,9 @@ test("an empty severity cell blocks", () => {
 });
 
 test("two glyphs in one cell block — the level is ambiguous", () => {
-  assert.ok(!gateWith(matrixWithSeverity("🔴🟡")).ok);
+  const r = gateWith(matrixWithSeverity("🔴🟡"));
+  assert.ok(!r.ok);
+  assert.ok(r.why.includes("S-01") && r.why.includes("🔴🟡"), "name the row and quote the cell");
 });
 
 test("a glyph with a word beside it passes — decoration is not the signal", () => {
