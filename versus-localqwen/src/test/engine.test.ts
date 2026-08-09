@@ -1627,6 +1627,60 @@ test("a conditional lens no round ever declared blocks", () => {
   }
 });
 
+/** A one-row matrix whose severity cell is what is under test. */
+function matrixWithSeverity(severity: string): string {
+  return [
+    "## Iteração 1 — V(1)",
+    "",
+    "| id | module | lens | severity | description |",
+    "|----|--------|------|----------|-------------|",
+    `| S-01 | store | Security | ${severity} | the severity column is what is under test |`,
+  ].join("\n");
+}
+
+/** Runs the 2→3 gate over a matrix, with everything else already earned. */
+function gateWith(body: string): { ok: boolean; why: string } {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    declareLenses(e);
+    writeCoverageMatrix(tmp, body);
+    const r = e.advancePhase(3);
+    return { ok: r.ok, why: r.ok ? "" : r.error.missingCriteria.join(" ") };
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+}
+
+test("the three severity glyphs pass", () => {
+  for (const g of ["🔴", "🟡", "🟢"]) {
+    assert.ok(gateWith(matrixWithSeverity(g)).ok, `${g} is a severity`);
+  }
+});
+
+test("a severity word instead of a glyph blocks", () => {
+  // The analysis counts criticals against important on this column, so a value
+  // it cannot count is a wrong count, not a missing one.
+  const r = gateWith(matrixWithSeverity("high"));
+  assert.ok(!r.ok);
+  assert.ok(r.why.includes("S-01"), "name the row");
+  assert.ok(r.why.includes('"high"'), "and quote the cell");
+});
+
+test("an empty severity cell blocks", () => {
+  const r = gateWith(matrixWithSeverity(" "));
+  assert.ok(!r.ok);
+  assert.ok(r.why.includes("(empty)"));
+});
+
+test("two glyphs in one cell block — the level is ambiguous", () => {
+  assert.ok(!gateWith(matrixWithSeverity("🔴🟡")).ok);
+});
+
+test("a glyph with a word beside it passes — decoration is not the signal", () => {
+  assert.ok(gateWith(matrixWithSeverity("🔴 Critical")).ok);
+});
+
 test("the Phase 2 lens tables render from lenses.ts", () => {
   // Moving the table from hand-written markdown to data must not change one byte
   // of what the model reads — that is the whole point of the consolidation.

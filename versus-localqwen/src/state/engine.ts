@@ -46,6 +46,9 @@ import {
 
 export { LOOP_FAILURE_THRESHOLD, DIAGNOSIS_CATEGORIES };
 
+/** The three severity levels, as the guidance fixes them. */
+const SEVERITIES = ["🔴", "🟡", "🟢"];
+
 interface ValidationResult {
   valid: boolean;
   missingCriteria: string[];
@@ -724,7 +727,7 @@ export class StateEngine {
   }
 
   /**
-   * The `lens` column of every finding, checked in two steps.
+   * The `lens` and `severity` columns of every finding.
    *
    * Minimum form: the value is one of the 19 canonical names, or the literal
    * NENHUMA for a finding that fit no lens. `Sustainability` is refused —
@@ -749,6 +752,22 @@ export class StateEngine {
     // Resolved alongside each row, not keyed by id: ids are meant to be unique,
     // but a gate must not turn a duplicate id into the wrong verdict on a row.
     const resolved: Array<{ finding: MatrixFinding; canonical: string }> = [];
+
+    // Severity is read the same way and for the same reason: the analysis counts
+    // criticals against important on this column, so a value it cannot count is a
+    // wrong count rather than a missing one. Tolerant of decoration, strict about
+    // the signal — `🔴 Critical` passes, `high`, `P1`, an empty cell and `🔴🟡` do not.
+    for (const f of findings) {
+      const glyphs = SEVERITIES.filter((g) => f.severity.includes(g));
+      if (glyphs.length !== 1) {
+        out.push(
+          `[Phase 2] coverage_matrix row ${f.id}: severity "${f.severity || "(empty)"}" must be ` +
+          `exactly one of 🔴 (Critical) / 🟡 (Important) / 🟢 (Suggestion). The analysis counts ` +
+          `criticals against important on this column — a word, a code like "P1", or an empty cell ` +
+          `cannot be counted.`
+        );
+      }
+    }
 
     for (const f of findings) {
       if (f.lens.trim().toUpperCase() === NO_LENS) continue;

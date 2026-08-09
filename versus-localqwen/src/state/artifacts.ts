@@ -23,13 +23,15 @@ export const VERSION_MARK = /V\s*\(?(\d+)\)?/i;
 const FINDING_ROW = /^\s*\|\s*((?!M-)[A-Za-z]{1,4}-\d+)\s*\|/;
 
 /** The frozen finding format: id | module | lens | severity | description. */
-const FINDING_CELLS = /^\s*\|\s*((?!M-)[A-Za-z]{1,4}-\d+)\s*\|([^|]*)\|([^|]*)\|/;
+const FINDING_CELLS = /^\s*\|\s*((?!M-)[A-Za-z]{1,4}-\d+)\s*\|([^|]*)\|([^|]*)\|([^|]*)/;
 
 export interface MatrixFinding {
   id: string;
   module: string;
   /** Verbatim, so a rejection can quote what was actually written. */
   lens: string;
+  /** Verbatim too, and "" when the cell is missing entirely — which must block. */
+  severity: string;
   /** The round whose heading this row sits under; null when there is none. */
   iteration: number | null;
 }
@@ -45,7 +47,13 @@ export function parseMatrixFindings(text: string): MatrixFinding[] {
     for (const line of p.body.split(/\r?\n/)) {
       const m = FINDING_CELLS.exec(line);
       if (m) {
-        out.push({ id: m[1], module: m[2].trim(), lens: m[3].trim(), iteration: p.n });
+        out.push({
+          id: m[1],
+          module: m[2].trim(),
+          lens: m[3].trim(),
+          severity: (m[4] ?? "").trim(),
+          iteration: p.n,
+        });
       }
     }
   }

@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.8.2] - 2026-08-09
+
+Standalone patch `APLICAR-GATE-DE-SEVERIDADE-NOS-OUTROS-BUILDS.md`, from Versus
+for Claude 0.14.2. Same family as the lens-column gate: an instruction the
+guidance gave and no gate enforced.
+
+### Added
+
+- **The `severity` column is checked on 2→3.** Exactly one of 🔴 / 🟡 / 🟢 per
+  finding. Tolerant of decoration, strict about the signal: `🔴 Critical` passes,
+  while `high`, `P1`, an empty cell and `🔴🟡` (ambiguous) block, naming the row
+  and quoting the cell. The analysis counts criticals against important on this
+  column, so a value it cannot count produces a wrong count rather than a missing
+  one — the seventh discard waiting to happen.
+
+  Runs inside the method that already walks the matrix findings, so it shares the
+  `from === 2` path and the same error list.
+
+### Notes
+
+- Evidence this blocks nothing that exists, per the spec's instruction to scan
+  first: across the 10 `coverage-matrix.md` files in this corpus, 853 findings use
+  exactly three glyphs — 🟡 487, 🟢 217, 🔴 149, zero variation. Same distribution
+  upstream reported.
+- The finding parser now also reads the 4th cell; a row missing it yields an empty
+  string, which blocks, as it should.
+- Deliberately NOT gated, replicating upstream's decision: the description of a
+  duplicate finding. The quality half ("describes the defect on its own") is the
+  oracle and not mechanisable, and the mechanisable forms — a pointer-only
+  description, a dangling `duplica:` — occur zero times in the corpus. A gate there
+  would guard nothing and risk a false block. It stays a declared limitation of the
+  protocol, not code.
+
 ## [0.8.1] - 2026-08-09
 
 Standalone patch `APLICAR-FAXINA-v0.14.1-LENTES-FONTE-UNICA-E-MIGRACAO-PT-NOS-OUTROS-BUILDS.md`,
