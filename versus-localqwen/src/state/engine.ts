@@ -17,10 +17,25 @@ import {
   ProjectSpec,
   SpecItem,
   specItemValue,
+  LensActivation,
 } from "./types";
 
 import { isValidTransition, getExitCriteriaForPhase, CRITERION_ID_MIGRATION } from "../rules/phases";
-import { ITERATION_MARK, LENS_MARKER, VERSION_MARK, parseMatrixIterations } from "./artifacts";
+import {
+  ITERATION_MARK,
+  LENS_MARKER,
+  VERSION_MARK,
+  MatrixFinding,
+  parseMatrixFindings,
+  parseMatrixIterations,
+} from "./artifacts";
+import {
+  CONDITIONAL_LENSES,
+  NO_LENS,
+  UNIVERSAL_LENSES,
+  canonicalLens,
+  isConditionalLens,
+} from "../rules/lenses";
 import {
   SafeguardResult,
   validateSafeguard,
@@ -244,15 +259,17 @@ export class StateEngine {
 
     const artifactMissing = this.missingEvidence(from);
 
-    // 2→3: matrix modules must exist in the architecture (union of all versions).
+    // 2→3: matrix modules must exist in the architecture (union of all versions),
+    // and every lens column must be a canonical name declared for its round.
     const moduleDrift = from === 2 ? this.moduleTraceabilityErrors() : [];
+    const lensErrors = from === 2 ? this.lensColumnErrors() : [];
 
-    if (!validation.valid || artifactMissing.length > 0 || moduleDrift.length > 0) {
+    if (!validation.valid || artifactMissing.length > 0 || moduleDrift.length > 0 || lensErrors.length > 0) {
       return {
         ok: false,
         error: {
           message: `Cannot advance from Phase ${from} to Phase ${targetPhase}.`,
-          missingCriteria: [...validation.missingCriteria, ...artifactMissing, ...moduleDrift],
+          missingCriteria: [...validation.missingCriteria, ...artifactMissing, ...moduleDrift, ...lensErrors],
           specsWarnings,
           // A violated safeguard vetoes the transition on its own. Dropping it
           // here left the caller with an empty reason and no way to act.
@@ -530,6 +547,64 @@ export class StateEngine {
   }
 
   /**
+   * Which round of the 2↔3 loop is being critiqued.
+   *
+   * Derived from how many transitions entered Phase 2, floor 1 — the contract the
+   * downstream analysis reads, and independent of `currentIteration`, which in
+   * other builds resets on every phase change. Here `currentIteration` does track
+   * the round, and `start_iteration(2)` can raise it without a transition, so the
+   * higher of the two wins: the two mechanisms must never disagree about which
+   * round a declaration belongs to.
+   */
+  critiqueRound(): number {
+    if (!this.state) return 1;
+    const entries = this.state.history.filter((h) => h.to === 2).length;
+    return Math.max(1, entries, this.state.currentIteration);
+  }
+
+  /** How many `## V(N)` sections the architecture doc carries, floor 1. */
+  architectureVersion(): number {
+    const text = this.readArtifact("technical/architecture.md");
+    const n = (text.match(/^\s*#{1,6}\s*V\s*\(?\d+\)?\b/gim) || []).length;
+    return Math.max(1, n);
+  }
+
+  /** The lens declaration for a round, if one was recorded. */
+  lensActivation(iteration: number): LensActivation | undefined {
+    return this.state?.activatedLenses?.find((a) => a.iteration === iteration);
+  }
+
+  /**
+   * Records the lens set for the round in progress. Re-recording the same round
+   * replaces it — a correction, not a second declaration — while a new round is
+   * pushed, because the history is what lets a finding be checked against the set
+   * that was in force when it was raised.
+   */
+  recordActivatedLenses(
+    conditional: string[],
+    notActivated: { lens: string; reason: string }[]
+  ): LensActivation {
+    if (!this.state) throw new Error("Project not initialized.");
+    const entry: LensActivation = {
+      universal: [...UNIVERSAL_LENSES],
+      conditional,
+      notActivated,
+      iteration: this.critiqueRound(),
+      againstVersion: this.architectureVersion(),
+      recordedAt: new Date().toISOString(),
+    };
+    if (!this.state.activatedLenses) this.state.activatedLenses = [];
+    const at = this.state.activatedLenses.findIndex((a) => a.iteration === entry.iteration);
+    if (at >= 0) {
+      this.state.activatedLenses[at] = entry;
+    } else {
+      this.state.activatedLenses.push(entry);
+    }
+    this.save();
+    return entry;
+  }
+
+  /**
    * Module names in the 2nd column of table rows whose 1st cell matches
    * `idPattern`. Normalized (trim + lowercase) for comparison.
    */
@@ -606,6 +681,9 @@ export class StateEngine {
           `pipes: 'M01' and a line without '|' do not count.`
         );
       }
+      if (def.verify === "lenses-recorded") {
+        out.push(...this.lensRecordEvidence());
+      }
       if (def.verify === "test-pass" && !this.witnessedTestPass(phase)) {
         out.push(
           `[Phase ${phase}] ${def.criterion}: no passing test run was witnessed in this phase. ` +
@@ -616,7 +694,6 @@ export class StateEngine {
       }
     }
     if (phase === 2) {
-      out.push(...this.lensDeclarationEvidence());
       out.push(...this.matrixRoundEvidence());
     }
     return out;
@@ -633,47 +710,110 @@ export class StateEngine {
   }
 
   /**
-   * The lens set must be declared once per round of the 2↔3 loop, naming the
-   * round and the architecture version it was chosen against. One accumulated
-   * declaration cannot say which set was in force when a given finding was
-   * raised, so "this finding used a lens nobody activated" stops being checkable
-   * — the union of every round always contains it.
+   * The lens set must be recorded once per round of the 2↔3 loop, as state rather
+   * than prose. An accumulated declaration cannot say which set was in force when
+   * a given finding was raised, so "this finding used a lens nobody activated"
+   * stops being checkable — the union of every round always contains it.
+   *
+   * Prose is accepted only for a project created before this existed, which is
+   * what `stateVersion` marks by its absence. Accepting it in a new project would
+   * turn the structural guarantee into an opt-out.
    */
-  private lensDeclarationEvidence(): string[] {
+  private lensRecordEvidence(): string[] {
     if (!this.state) return [];
-    const iteration = this.state.currentIteration;
-    const candidates = this.state.decisions.filter(
-      (d) => d.phase === 2 && d.category === "architecture" && LENS_MARKER.test(d.content)
-    );
+    const round = this.critiqueRound();
+    if (this.lensActivation(round)) return [];
 
-    const forThisRound = candidates.filter((d) => {
-      const m = ITERATION_MARK.exec(d.content);
-      const n = m ? Number(m[1] ?? m[2]) : NaN;
-      return n === iteration;
-    });
-
-    if (forThisRound.length === 0) {
-      return [
-        `[Phase 2] activated_lenses_recorded: no lens declaration found for iteration ${iteration}. ` +
-        `Each round of the 2↔3 loop critiques a different architecture, so each round declares its ` +
-        `own set: record_decision(phase=2, category='architecture', content="LENTES ATIVADAS — ` +
-        `iteração ${iteration}, contra V(${iteration}): ..."). Keep the tokens 'LENTES ATIVADAS', ` +
-        `'iteração ${iteration}' and 'V(N)' literal — they are read by an external analysis, and a ` +
-        `declaration it cannot date is a declaration it has to discard. List the non-activated ` +
-        `lenses with an individual justification, as always.`,
-      ];
+    if (this.state.stateVersion === undefined) {
+      const prose = this.state.decisions.some((d) => {
+        if (d.phase !== 2 || d.category !== "architecture") return false;
+        if (!LENS_MARKER.test(d.content)) return false;
+        const m = ITERATION_MARK.exec(d.content);
+        return (m ? Number(m[1] ?? m[2]) : NaN) === round && VERSION_MARK.test(d.content);
+      });
+      if (prose) return [];
     }
 
-    if (!forThisRound.some((d) => VERSION_MARK.test(d.content))) {
-      return [
-        `[Phase 2] activated_lenses_recorded: the iteration ${iteration} lens declaration does not ` +
-        `name the architecture version it was made against. Add 'V(N)' to it — without it the ` +
-        `version has to be inferred from timestamps, which is where the "estimated against V(1) or ` +
-        `V(final)?" ambiguity comes from.`,
-      ];
+    return [
+      `[Phase 2] activated_lenses_recorded: no lens set recorded for iteration ${round}. Call ` +
+      `record_activated_lenses(conditional=[...], notActivated=[{lens, reason}, ...]) — all 12 ` +
+      `conditional lenses must be accounted for, each either activated or refused with its own ` +
+      `reason. Each round of the 2↔3 loop critiques a different architecture, so each round records ` +
+      `its own set; the previous round's does not carry over. Canonical names only: the tool refuses ` +
+      `a translation or an abbreviation at the call, which is cheaper than discovering it in the ` +
+      `matrix later.`,
+    ];
+  }
+
+  /**
+   * The `lens` column of every finding, checked in two steps.
+   *
+   * Minimum form: the value is one of the 19 canonical names, or the literal
+   * NENHUMA for a finding that fit no lens. `Sustainability` is refused —
+   * truncation is what cost a project slot upstream, because the row gate only
+   * ever read the first cell.
+   *
+   * Strong form: a conditional lens must have been declared for the round THAT
+   * FINDING belongs to. Universals always pass. The round matters: a lens can
+   * enter the set at round 2, which makes it legitimate there and anachronistic in
+   * round 1. Where the round cannot be resolved — no heading, or no declaration
+   * for that number — this degrades to the union of every declared set, which is
+   * permissive by design: it must never block a legitimate project.
+   */
+  private lensColumnErrors(): string[] {
+    const matrix = this.readArtifact("design/coverage-matrix.md");
+    if (!matrix) return [];
+    const findings = parseMatrixFindings(matrix);
+    if (findings.length === 0) return [];
+
+    const out: string[] = [];
+    const unknown: string[] = [];
+    // Resolved alongside each row, not keyed by id: ids are meant to be unique,
+    // but a gate must not turn a duplicate id into the wrong verdict on a row.
+    const resolved: Array<{ finding: MatrixFinding; canonical: string }> = [];
+
+    for (const f of findings) {
+      if (f.lens.trim().toUpperCase() === NO_LENS) continue;
+      const c = canonicalLens(f.lens);
+      if (!c) {
+        unknown.push(`${f.id} → '${f.lens}'`);
+      } else {
+        resolved.push({ finding: f, canonical: c });
+      }
     }
 
-    return [];
+    if (unknown.length > 0) {
+      out.push(
+        `[Phase 2] coverage_matrix: the lens column is not a canonical lens name in ${unknown.length} ` +
+        `finding(s): ${unknown.join("; ")}. Write the name exactly as the guidance spells it — ` +
+        `'Sustainability / Proportionality', not 'Sustainability'; 'Security', not 'Segurança' or ` +
+        `'SEG'. Case and the spacing around a slash are the only tolerated variation. The name is ` +
+        `the join key: a truncated one aggregates as a different lens, silently. A finding that fits ` +
+        `no lens takes the literal ${NO_LENS}.`
+      );
+    }
+
+    const declared = this.state?.activatedLenses ?? [];
+    if (declared.length === 0) return out;
+    const union = new Set(declared.flatMap((a) => a.conditional));
+
+    for (const { finding: f, canonical: c } of resolved) {
+      if (!isConditionalLens(c)) continue;
+      const forRound = f.iteration === null ? undefined : this.lensActivation(f.iteration);
+      const allowed = forRound ? new Set(forRound.conditional) : union;
+      if (allowed.has(c)) continue;
+      const where = forRound
+        ? `iteration ${f.iteration}, which activated ${[...allowed].join(", ") || "no conditional lens"}`
+        : `any round on record, which activated ${[...allowed].join(", ") || "no conditional lens"}`;
+      out.push(
+        `[Phase 2] coverage_matrix: finding ${f.id} uses the conditional lens '${c}', which was not ` +
+        `declared for ${where}. Either the round applied a lens it never activated — record it with ` +
+        `record_activated_lenses before critiquing — or the finding belongs to a different round and ` +
+        `sits under the wrong '## Iteração N' heading.`
+      );
+    }
+
+    return out;
   }
 
   /**

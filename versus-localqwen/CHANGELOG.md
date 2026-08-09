@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.8.0] - 2026-08-09
+
+Standalone patch `APLICAR-LENTES-ESTRUTURADAS-E-GATE-DE-LENTE-NOS-OUTROS-BUILDS.md`,
+from Versus for Claude 0.14.0. Minor bump: a new MCP tool, a new state field, and
+a Phase 2 gate that blocks what earlier builds allowed.
+
+### Added
+
+- **`src/rules/lenses.ts` — the 19 lenses as data.** `UNIVERSAL_LENSES` (7),
+  `CONDITIONAL_LENSES` (12), `canonicalLens(raw)`. Case and the spacing around a
+  slash are tolerated (`UI / UX` = `UI/UX`); translations, abbreviations and
+  truncations are not, because each aggregates as a different lens rather than
+  failing loudly.
+- **`record_activated_lenses(conditional, notActivated)`.** Replaces the prose
+  declaration. The schema enum admits only the 12 conditional names, and the
+  handler refuses five ways: a non-canonical name, a universal lens passed as
+  conditional (the conditional count is a measured variable), a lens listed as
+  both activated and not, a duplicate, and a refusal with an empty reason. All 12
+  must be accounted for. It answers with the `iteration` and `againstVersion` it
+  recorded and the matrix heading to use.
+- **`state.activatedLenses` — one `LensActivation` per round, in an array.**
+  Fields: `universal`, `conditional`, `notActivated` (`[{lens, reason}]`),
+  `iteration`, `againstVersion`, `recordedAt`. Re-recording the same round
+  replaces it (a correction); a new round pushes, because that history is what
+  lets a finding be checked against the set in force when it was raised.
+- **`state.stateVersion` (1), stamped by `init_project`.** Its ABSENCE is what
+  marks a legacy project, and the prose declaration is accepted only there.
+  Without the stamp the fallback would be an opt-out in every new project.
+- **The lens column is gated on 2→3.** Minimum form: one of the 19 canonical
+  names or the literal `NENHUMA`. Strong form: a conditional lens must have been
+  declared for the round THAT FINDING sits under. Universals always pass. Where
+  the round cannot be resolved — no heading, or no declaration for that number —
+  it degrades to the union of every declared set, permissive by design: a missed
+  check is the acceptable failure here, a blocked legitimate project is not.
+
+### Changed
+
+- `activated_lenses_recorded` gained `verify: "lenses-recorded"`; it was the only
+  Phase 2 criterion with no evidence behind its checkbox.
+- Phase 2's guidance teaches the tool instead of the prose format, and states that
+  the lens column is read on 2→3.
+
+### Notes
+
+- The round a declaration belongs to is derived from how many transitions entered
+  Phase 2, floor 1 — the contract the analysis reads. This build also keeps
+  `currentIteration` tracking the round (0.7.0) and lets `start_iteration(2)`
+  raise it without a transition, so the higher of the two wins and the two
+  mechanisms cannot disagree.
+- Found while writing the tests: keying the resolved lens name by finding id let a
+  duplicate id decide another row's verdict. Resolved per row now.
+- Data consequence, carried from the spec: any slot run under the old behaviour
+  that carries a non-canonical lens name should be discarded (upstream discarded
+  T21, its second discard of the same slot).
+
 ## [0.7.4] - 2026-08-06
 
 Standalone patch `APLICAR-RESET-SIMETRICO-DO-LACO-NOS-OUTROS-BUILDS.md`, from

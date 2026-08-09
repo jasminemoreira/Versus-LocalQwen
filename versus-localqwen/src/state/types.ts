@@ -2,6 +2,13 @@
 
 export interface PhaseState {
   agent?: "copilot" | "claude" | "localqwen";  // identifies which extension owns this state
+  /**
+   * Format version of this file. Its ABSENCE is what marks a project written
+   * before the structured lens declaration existed, which is the only case where
+   * the old prose declaration is still accepted. Stamped by init_project so the
+   * fallback cannot become an opt-out in a new project.
+   */
+  stateVersion?: number;
   projectName: string;
   projectDescription: string;
   projectSpec: ProjectSpec;      // structured technical context
@@ -13,6 +20,8 @@ export interface PhaseState {
   exitCriteria: ExitCriterionState[];
   safeguards: SafeguardState[];
   loopCounter: LoopCounter;
+  /** One entry per critique round — an array, never an accumulated record. */
+  activatedLenses?: LensActivation[];
   /** Last test run the engine witnessed, via record_test_outcome. Gates tests_passing. */
   lastTestOutcome?: { outcome: "pass" | "fail"; phase: number; at: string };
   lastPhaseStateCheck?: string;  // ISO timestamp — gateway guard for smaller models
@@ -36,6 +45,22 @@ export interface SpecEntry {
 
 /** Read in both forms: bare strings from projects written before 0.7.0, and stamped entries. */
 export type SpecItem = string | SpecEntry;
+
+/**
+ * The lens set a single round of Phase 2 critiqued with. One of these per round:
+ * the set evolves between rounds, so a finding can only be checked against the
+ * set that was in force when it was raised. An accumulated record would make
+ * "this finding used a lens nobody activated" uncheckable, since the union of
+ * every round always contains the lens.
+ */
+export interface LensActivation {
+  universal: string[];                                  // the 7, always
+  conditional: string[];                                // the subset activated THIS round
+  notActivated: { lens: string; reason: string }[];
+  iteration: number;                                    // 1 = first pass through Phase 2
+  againstVersion: number;                               // the architecture V(N) it was decided against
+  recordedAt: string;                                   // ISO
+}
 
 /** Structured technical context — survives model switches */
 export interface ProjectSpec {
@@ -131,9 +156,17 @@ export type Result<T, E> =
   | { ok: true; value: T }
   | { ok: false; error: E };
 
+/**
+ * Current state format. Bumped only when a reader needs to tell the shapes apart;
+ * its presence alone is what says "this project was created after the structured
+ * lens declaration became mandatory".
+ */
+export const STATE_VERSION = 1;
+
 export function createDefaultState(name: string, description: string): PhaseState {
   return {
     agent: "localqwen",
+    stateVersion: STATE_VERSION,
     projectName: name,
     projectDescription: description,
     projectSpec: { stack: [], outOfScope: [], patterns: [], constraints: [] },

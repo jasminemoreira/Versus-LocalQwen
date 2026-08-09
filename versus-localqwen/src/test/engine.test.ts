@@ -22,6 +22,8 @@ import {
   resolveBudgetFloor,
 } from "../ollama/client";
 import { handleGetPhaseGuidance } from "../mcp/tools/guidance-tools";
+import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
+import { CONDITIONAL_LENSES, UNIVERSAL_LENSES, canonicalLens } from "../rules/lenses";
 
 function createTempWorkspace(): string {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "versus-test-"));
@@ -858,17 +860,20 @@ test("a CommonJS bundle dies under a type:module project without the pin", () =>
 console.log("\n=== Evidence Gate Tests ===\n");
 
 /**
- * The per-round lens declaration Phase 2 owes. The tokens are the contract an
- * external analysis reads, so the fixture spells them the way the guidance does.
+ * The per-round lens set Phase 2 owes, through the real tool so the fixture is
+ * subject to the same validation a model is. The round is derived by the engine,
+ * not passed in.
  */
-function declareLenses(engine: StateEngine, iteration = 1): void {
-  engine.recordDecision(
-    2,
-    "architecture",
-    `LENTES ATIVADAS — iteração ${iteration}, contra V(${iteration}). Universais (7, sempre): todas. ` +
-      "Condicionais ATIVADAS (1): Resilience. NÃO ativadas, com justificativa: UI/UX (no interface " +
-      "in this cycle); Migration (greenfield, nothing to coexist with)."
+function declareLenses(engine: StateEngine): void {
+  const activated = ["Resilience", "Mechanical Engineering"];
+  const refused = CONDITIONAL_LENSES.filter((l) => !activated.includes(l)).map((lens) => ({
+    lens,
+    reason: "no project signal for it in this cycle",
+  }));
+  const res = JSON.parse(
+    handleRecordActivatedLenses(engine, { conditional: activated, notActivated: refused })
   );
+  assert.strictEqual(res.success, true, `the fixture itself must be valid: ${res.problems}`);
 }
 
 function markAll(engine: StateEngine, phase: number): void {
@@ -1113,29 +1118,76 @@ test("Phase 2 will not advance without a lens declaration for this round", () =>
     assert.ok(!blocked.ok, "every criterion is marked, but nothing declared the lens set");
     if (!blocked.ok) {
       assert.ok(
-        blocked.error.missingCriteria.some((m) => m.includes("lens declaration found for iteration 1")),
+        blocked.error.missingCriteria.some((m) => m.includes("no lens set recorded for iteration 1")),
         "the block must name the round it wants"
       );
     }
-    declareLenses(e, 1);
-    assert.ok(e.advancePhase(3).ok, "the declaration unblocks it");
+    declareLenses(e);
+    assert.ok(e.advancePhase(3).ok, "the recorded set unblocks it");
   } finally {
     cleanTempWorkspace(tmp);
   }
 });
 
-test("the declaration must name the architecture version it was made against", () => {
+/** The prose declaration is the old format: honoured only where it was all there was. */
+const PROSE_DECLARATION =
+  "LENTES ATIVADAS — iteração 1, contra V(1). Universais (7): todas. " +
+  "Condicionais ATIVADAS (1): Resilience. NÃO ativadas, com justificativa: UI/UX (sem interface).";
+
+test("prose does not satisfy the gate in a project created with a stateVersion", () => {
   const { engine: e, tmp } = atPhase2();
   try {
     markAll(e, 2);
     writeCoverageMatrix(tmp);
-    // Round named, version omitted: datable but not attributable to a design.
-    e.recordDecision(2, "architecture", "LENTES ATIVADAS — iteração 1: as 7 universais e mais nada.");
+    e.recordDecision(2, "architecture", PROSE_DECLARATION);
     const blocked = e.advancePhase(3);
-    assert.ok(!blocked.ok);
+    assert.ok(!blocked.ok, "the fallback must not become an opt-out in a new project");
     if (!blocked.ok) {
-      assert.ok(blocked.error.missingCriteria.some((m) => m.includes("architecture version")));
+      assert.ok(blocked.error.missingCriteria.some((m) => m.includes("record_activated_lenses")));
     }
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("prose still satisfies the gate in a project written before stateVersion", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    // What a pre-0.8.0 state.json looks like: no format stamp at all.
+    delete (e.getPhaseState() as any).stateVersion;
+    markAll(e, 2);
+    writeCoverageMatrix(tmp);
+    e.recordDecision(2, "architecture", PROSE_DECLARATION);
+    assert.ok(e.advancePhase(3).ok, "a legacy project is not retroactively broken");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the recorded set persists per round, with its version", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    declareLenses(e);
+    const first = e.getPhaseState()!.activatedLenses!;
+    assert.strictEqual(first.length, 1);
+    assert.strictEqual(first[0].iteration, 1);
+    assert.strictEqual(first[0].againstVersion, 1, "one module table, no ## V(N) heading yet");
+    assert.deepStrictEqual(first[0].universal, [...UNIVERSAL_LENSES]);
+    assert.strictEqual(first[0].notActivated.length, CONDITIONAL_LENSES.length - 2);
+
+    // Re-recording the same round is a correction, not a second declaration.
+    declareLenses(e);
+    assert.strictEqual(e.getPhaseState()!.activatedLenses!.length, 1);
+
+    // A new round pushes, so the history the lens gate reads survives.
+    markAll(e, 2);
+    writeCoverageMatrix(tmp);
+    assert.ok(e.advancePhase(3).ok);
+    markAll(e, 3);
+    assert.ok(e.advancePhase(2).ok);
+    declareLenses(e);
+    const rounds = e.getPhaseState()!.activatedLenses!;
+    assert.deepStrictEqual(rounds.map((r) => r.iteration), [1, 2]);
   } finally {
     cleanTempWorkspace(tmp);
   }
@@ -1145,7 +1197,7 @@ test("re-entering Phase 2 opens a new round and asks for its own declaration", (
   const { engine: e, tmp } = atPhase2();
   try {
     markAll(e, 2);
-    declareLenses(e, 1);
+    declareLenses(e);
     writeCoverageMatrix(tmp);
     assert.ok(e.advancePhase(3).ok);
     assert.strictEqual(e.getPhaseState()!.currentIteration, 1, "2→3 stays inside round 1");
@@ -1183,7 +1235,7 @@ test("re-entering Phase 2 opens a new round and asks for its own declaration", (
       assert.ok(blocked.error.missingCriteria.some((m) => m.includes("iteration 2")));
     }
 
-    declareLenses(e, 2);
+    declareLenses(e);
     // Round 2 also owes its own section in the matrix; without it every finding
     // in the file would read as round 1.
     const stillRound1 = e.advancePhase(3);
@@ -1212,14 +1264,14 @@ test("after a loop, Phase 4 waits for Phase 3 to be answered again", () => {
   try {
     // 2→3 · 3→2 · 2→3, then the gate to Phase 4.
     markAll(e, 2);
-    declareLenses(e, 1);
+    declareLenses(e);
     writeCoverageMatrix(tmp);
     assert.ok(e.advancePhase(3).ok);
     markAll(e, 3);
     assert.ok(e.advancePhase(2).ok);
 
     markAll(e, 2);
-    declareLenses(e, 2);
+    declareLenses(e);
     writeCoverageMatrix(tmp, [
       FINDINGS_TABLE,
       "",
@@ -1249,7 +1301,7 @@ test("a finding citing a module no version declares is drift, and blocks", () =>
   const { engine: e, tmp } = atPhase2();
   try {
     markAll(e, 2);
-    declareLenses(e, 1);
+    declareLenses(e);
     writeCoverageMatrix(tmp, [
       "## Iteração 1 — V(1)",
       "",
@@ -1291,7 +1343,7 @@ test("a module removed between versions is tolerated, not drift", () => {
       "| M-01 | store | counters and quota | get(key) / allow(key) | — |",
     ].join("\n"));
     markAll(e, 2);
-    declareLenses(e, 1);
+    declareLenses(e);
     writeCoverageMatrix(tmp, [
       "## Iteração 1 — V(1)",
       "",
@@ -1350,9 +1402,230 @@ test("the guidance states the contract the analysis reads", () => {
   const g = getCompleteGuidance();
   // The iteration token is Portuguese on purpose — it is what downstream matches.
   assert.ok(g.includes("## Iteração 2 — V(2)"), "the matrix section heading");
-  assert.ok(g.includes("LENTES ATIVADAS — iteração 2, contra V(2)"), "the declaration opener");
+  assert.ok(g.includes("record_activated_lenses"), "the tool that replaced the prose declaration");
+  assert.ok(!g.includes("LENTES ATIVADAS"), "the prose format is no longer taught");
   assert.ok(/Activation is by PROJECT SIGNAL/.test(g), "redundancy is not grounds to skip a lens");
   assert.ok(/duplica\S* applies \*\*within a single lens/.test(g), "duplica within one lens");
+});
+
+
+// --- Structured lens declaration and the lens column (RO3 v0.8.0) ---
+
+console.log("\n=== Lens Tests ===\n");
+
+/** Calls the tool directly, so the refusals are tested where they live. */
+function record(engine: StateEngine, conditional: unknown, notActivated: unknown): any {
+  return JSON.parse(handleRecordActivatedLenses(engine, { conditional, notActivated } as any));
+}
+
+/** All 12 accounted for: `activated` on, the rest refused with a reason. */
+function payload(activated: string[], reason = "no signal") {
+  return {
+    conditional: activated,
+    notActivated: CONDITIONAL_LENSES.filter((l) => !activated.includes(l)).map((lens) => ({ lens, reason })),
+  };
+}
+
+test("canonicalLens tolerates case and slash spacing, nothing else", () => {
+  assert.strictEqual(canonicalLens("ui / ux"), "UI/UX");
+  assert.strictEqual(canonicalLens("SECURITY"), "Security");
+  assert.strictEqual(canonicalLens("Sustainability / Proportionality"), "Sustainability / Proportionality");
+  // The T21 failure: a truncation is a different name, not a spelling variant.
+  assert.strictEqual(canonicalLens("Sustainability"), null);
+  assert.strictEqual(canonicalLens("Segurança"), null);
+  assert.strictEqual(canonicalLens("SEG"), null);
+});
+
+test("record_activated_lenses refuses a translation or an abbreviation", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    const p = payload(["Resilience"]);
+    assert.strictEqual(record(e, ["Resiliência"], p.notActivated).success, false);
+    assert.strictEqual(record(e, ["RES"], p.notActivated).success, false);
+    assert.strictEqual(record(e, ["Resilience"], p.notActivated).success, true);
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("record_activated_lenses requires all 12 to be accounted for", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    const res = record(e, ["Resilience"], [{ lens: "UI/UX", reason: "no interface" }]);
+    assert.strictEqual(res.success, false);
+    assert.ok(res.problems.some((p: string) => p.includes("Not accounted for")));
+    assert.ok(res.problems.some((p: string) => p.includes("Game Theory")), "name the ones missing");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("record_activated_lenses refuses a refusal with no reason", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    const p = payload(["Resilience"], "");
+    const res = record(e, p.conditional, p.notActivated);
+    assert.strictEqual(res.success, false);
+    assert.ok(res.problems.some((x: string) => x.includes("has no reason")));
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("record_activated_lenses refuses a universal lens as conditional", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    // canonicalLens accepts all 19; the count of CONDITIONAL lenses is the
+    // measured variable, so a universal smuggled in would inflate it.
+    const p = payload(["Resilience"]);
+    let res = record(e, ["Resilience", "Security"], p.notActivated);
+    assert.strictEqual(res.success, false);
+    assert.ok(res.problems.some((x: string) => x.includes("UNIVERSAL")));
+
+    res = record(e, p.conditional, [...p.notActivated, { lens: "Security", reason: "x" }]);
+    assert.strictEqual(res.success, false);
+    assert.ok(res.problems.some((x: string) => x.includes("UNIVERSAL")));
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("record_activated_lenses refuses a lens that is both activated and not", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    const notActivated = CONDITIONAL_LENSES.map((lens) => ({ lens, reason: "no signal" }));
+    const res = record(e, ["Resilience"], notActivated);
+    assert.strictEqual(res.success, false);
+    assert.ok(res.problems.some((x: string) => x.includes("activated AND as not activated")));
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("record_activated_lenses refuses a duplicate", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    const p = payload(["Resilience"]);
+    // Duplicated, it would pass the completeness count while claiming two lenses.
+    const res = record(e, ["Resilience", "resilience"], p.notActivated);
+    assert.strictEqual(res.success, false);
+    assert.ok(res.problems.some((x: string) => x.includes("appears twice")));
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+/** Builds a one-round matrix with the given lens in the 3rd column. */
+function matrixWithLens(lens: string, iteration = 1): string {
+  return [
+    `## Iteração ${iteration} — V(${iteration})`,
+    "",
+    "| id | module | lens | severity | description |",
+    "|----|--------|------|----------|-------------|",
+    `| X-0${iteration} | store | ${lens} | 🟡 | a finding whose lens column is what is under test |`,
+  ].join("\n");
+}
+
+test("a truncated lens name blocks 2→3 (the T21 failure)", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    declareLenses(e);
+    writeCoverageMatrix(tmp, matrixWithLens("Sustainability"));
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok, "the row gate only ever read the first cell");
+    if (!blocked.ok) {
+      const msg = blocked.error.missingCriteria.join(" ");
+      assert.ok(msg.includes("X-01"), "name the row");
+      assert.ok(msg.includes("'Sustainability'"), "and quote what was written");
+    }
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("NENHUMA and slash spacing pass the lens column", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    declareLenses(e);
+    writeCoverageMatrix(tmp, matrixWithLens("NENHUMA"));
+    assert.ok(e.advancePhase(3).ok, "a finding that fit no lens has a channel");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a conditional lens is checked against the round that declared it", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    // Round 1 activates Resilience and Mechanical Engineering only.
+    markAll(e, 2);
+    declareLenses(e);
+    writeCoverageMatrix(tmp, matrixWithLens("Mechanical Engineering", 1));
+    assert.ok(e.advancePhase(3).ok, "declared for round 1, used in round 1");
+
+    // Round 2 activates Game Theory instead. The T14 case: the set evolves.
+    markAll(e, 3);
+    assert.ok(e.advancePhase(2).ok);
+    markAll(e, 2);
+    const p = payload(["Game Theory"]);
+    assert.strictEqual(record(e, p.conditional, p.notActivated).success, true);
+
+    // Round 2 using round 1's lens is anachronistic in the other direction.
+    writeCoverageMatrix(tmp, [matrixWithLens("Mechanical Engineering", 1), "", matrixWithLens("Mechanical Engineering", 2)].join("\n"));
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok, "round 2 never activated Mechanical Engineering");
+    if (!blocked.ok) {
+      const msg = blocked.error.missingCriteria.join(" ");
+      assert.ok(msg.includes("Mechanical Engineering"));
+      assert.ok(msg.includes("iteration 2"), "name the round that did not declare it");
+    }
+
+    // Round 2 using its own lens passes, and round 1's row is still fine.
+    writeCoverageMatrix(tmp, [matrixWithLens("Mechanical Engineering", 1), "", matrixWithLens("Game Theory", 2)].join("\n"));
+    assert.ok(e.advancePhase(3).ok, "each row answers to its own round");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("an unresolvable round degrades to the union, never blocking a legitimate project", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    declareLenses(e);
+    // No iteration heading at all: the round is unknown, so the permissive set
+    // applies. Being wrong here must cost a missed check, not a blocked project.
+    writeCoverageMatrix(tmp, [
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| X-01 | store | Resilience | 🟡 | no heading above it |",
+    ].join("\n"));
+    assert.ok(e.advancePhase(3).ok);
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a conditional lens no round ever declared blocks", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    declareLenses(e);
+    writeCoverageMatrix(tmp, matrixWithLens("Game Theory", 1));
+    const blocked = e.advancePhase(3);
+    assert.ok(!blocked.ok, "a lens applied without being activated is not a critique");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the 19 canonical names are the ones the guidance teaches", () => {
+  const g = getCompleteGuidance();
+  for (const lens of [...UNIVERSAL_LENSES, ...CONDITIONAL_LENSES]) {
+    assert.ok(g.includes(lens), `the guidance must spell '${lens}' the way lenses.ts does`);
+  }
 });
 
 console.log("\n=== All tests completed ===\n");

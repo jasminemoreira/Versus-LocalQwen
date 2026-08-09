@@ -12,6 +12,7 @@ import { initProjectTool, handleInitProject } from "./project-tools";
 import { getPhaseGuidanceTool, handleGetPhaseGuidance } from "./guidance-tools";
 import { checkContextBudgetTool, handleCheckContextBudget } from "./context-tools";
 import { recordTestOutcomeTool, handleRecordTestOutcome } from "./loop-tools";
+import { recordActivatedLensesTool, handleRecordActivatedLenses } from "./lens-tools";
 
 export const ALL_TOOLS: Tool[] = [
   getPhaseStateTool,
@@ -31,6 +32,7 @@ export const ALL_TOOLS: Tool[] = [
   startNewCycleTool,
   checkContextBudgetTool,
   recordTestOutcomeTool,
+  recordActivatedLensesTool,
 ];
 
 /**
@@ -117,6 +119,7 @@ function sanitize(args: Record<string, unknown>): Record<string, unknown> {
   if ("constraints" in out) out.constraints = toStringArray(out.constraints);
   if ("planned_chars" in out) out.planned_chars = toNumber(out.planned_chars);
   if ("failed" in out) out.failed = toBoolean(out.failed);
+  if ("conditional" in out) out.conditional = toStringArray(out.conditional);
   return out;
 }
 
@@ -129,6 +132,8 @@ async function dispatch(
   switch (toolName) {
     case "check_context_budget":
       return handleCheckContextBudget(args as { planned_chars?: number; intent?: string }, toolSurface());
+    case "record_activated_lenses":
+      return handleRecordActivatedLenses(engine, args as { conditional?: unknown; notActivated?: unknown });
     case "record_test_outcome":
       return handleRecordTestOutcome(engine, args as { command: string; failed: boolean });
     case "get_phase_state":

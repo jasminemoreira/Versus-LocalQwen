@@ -45,7 +45,7 @@ export interface ExitCriterionDef {
    * Mechanical verification beyond the boolean. "test-pass": a passing run must
    * have been witnessed in this phase (S4).
    */
-  verify?: "test-pass";
+  verify?: "test-pass" | "lenses-recorded";
 }
 
 export const PHASE_DEFINITIONS: PhaseDefinition[] = [
@@ -131,7 +131,7 @@ export const EXIT_CRITERIA: ExitCriterionDef[] = [
   { phase: 1, criterion: "modules_adherent_patterns", description: "Modules adherent to chosen patterns", required: true },
 
   // Phase 2
-  { phase: 2, criterion: "activated_lenses_recorded", description: "Activated conditional lenses recorded via record_decision(category='architecture') BEFORE starting critique — with justification for each non-activated lens. Conditional lenses include: 8 situational (Resilience, UI/UX, Migration, Sustainability, Ethical, Process, Governance, Observability) + 4 Domain Transfer Lenses (Control Engineering, Game Theory, Linguistics/Grammar, Mechanical Engineering). Absence of findings is a valid result — no lens may be skipped.", required: true },
+  { phase: 2, criterion: "activated_lenses_recorded", description: "Activated conditional lenses recorded via record_activated_lenses() BEFORE starting critique — with justification for each non-activated lens. Conditional lenses include: 8 situational (Resilience, UI/UX, Migration, Sustainability, Ethical, Process, Governance, Observability) + 4 Domain Transfer Lenses (Control Engineering, Game Theory, Linguistics/Grammar, Mechanical Engineering). Absence of findings is a valid result — no lens may be skipped.", required: true, verify: "lenses-recorded" },
   { phase: 2, criterion: "lenses_applied", description: "All 7 universal lenses + all activated conditional lenses applied to each module (no lens skipped — absence of findings is a valid result)", required: true },
   { phase: 2, criterion: "coverage_matrix", description: "Coverage findings table written to specs/design/coverage-matrix.md — ONE ROW PER FINDING (id | module | lens | severity | description), each with a unique in-project id and 'duplica: <id>' when it is the same defect another lens found", required: true , artifact: "design/coverage-matrix.md", artifactRows: { pattern: "\\|\\s*(?!M-)[A-Za-z]{1,4}-\\d+\\s*\\|", count: 1, example: "P-01 | auth | Security | 🔴 | sql-injection in login" }},
   { phase: 2, criterion: "criticals_identified", description: "Critical findings identified and classified", required: true },

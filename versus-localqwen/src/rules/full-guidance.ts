@@ -433,19 +433,23 @@ Selection principle: if removing this lens, is there a failure class that NO oth
 
 Conditional lens activation: review ProjectSpec (stack, constraints, out-of-scope) and activate applicable lenses (situational + DTLs). Record activated set with record_decision(category='architecture').
 
-### DECLARE THE LENS SET ONCE PER ITERATION (MANDATORY — the gate blocks without it):
-Every round of the 2↔3 loop critiques a DIFFERENT architecture, so every round declares its own set — never one declaration amended across rounds. Re-entering Phase 2 clears \`activated_lenses_recorded\` and the gate asks again. Open the decision with this line, keeping the tokens \`LENTES ATIVADAS\`, \`iteração N\` and \`V(N)\` literal even though the rest may be in English — an external analysis reads them, and a declaration it cannot date or version is one it has to discard:
+### RECORD THE LENS SET ONCE PER ITERATION (MANDATORY — the gate blocks without it):
+Call \`record_activated_lenses\` BEFORE critiquing, not a prose decision:
 
 \`\`\`
-LENTES ATIVADAS — iteração 2, contra V(2). Universais (7, sempre): ...
-Condicionais ATIVADAS (5): ... NÃO ativadas, com justificativa: ...
+record_activated_lenses(
+  conditional: ["Resilience", "Observability / Operability"],
+  notActivated: [{ lens: "UI/UX", reason: "no surface a person operates in this cycle" }, ...]
+)
 \`\`\`
 
-The version is the architecture you have in front of you: iteration N critiques \`## V(N)\` in \`specs/technical/architecture.md\`. Without it the version has to be inferred from timestamps, and "was this estimated against V(1) or V(final)?" becomes unanswerable.
+**All 12 conditional lenses must be accounted for** — activated, or not activated with its own reason. The tool refuses a name that is not canonical, a universal lens passed as conditional, a lens listed as both, a duplicate, and a refusal with an empty reason. It refuses at the call, which is cheaper than finding it in the matrix a phase later.
+
+Every round of the 2↔3 loop critiques a DIFFERENT architecture, so every round records its own set — never one amended across rounds. Re-entering Phase 2 clears the criterion and the gate asks again. The tool answers with the \`iteration\` and the \`againstVersion\` it recorded: iteration N critiques \`## V(N)\` in \`specs/technical/architecture.md\`, and those two numbers are what tie a finding to the design it was raised against.
 
 **Activation is by PROJECT SIGNAL, and only that.** That another lens seems to cover the same failure class is NOT a reason to skip one — absence of findings is already a valid result, and deciding in advance that two lenses overlap is the conclusion, not the premise. Lenses that overlap never running together makes the overlap unobservable by construction. Concretely: do not skip Mechanical Engineering because Resilience "already covers tolerance to input variation". Activate on the signal, run both, and let the matrix show whether they found the same defect.
 
-Each non-activated lens still needs its own individual justification — the text of those justifications is evidence, so "not applicable" alone is not a justification.
+Each non-activated lens still needs its own individual justification — the text of those justifications is evidence, so "not applicable" alone is not a justification. Say which project signal is absent.
 
 ### Protocol per lens:
 1. Apply central question to EACH module
@@ -482,7 +486,7 @@ Each finding gets its own id. Where two findings overlap, say so with \`duplica:
 
 **The \`module\` column takes a module name from the table in \`specs/technical/architecture.md\`, spelled the same way** — the name is what ties a finding to a design, and Phase 3 routes by it. The gate checks it on 2→3, against ANY \`## V(N)\` version: a module that V(2) removed is still the right name for a finding iteration 1 raised against V(1), so removal is tolerated. A name that appears in no version at all is drift and blocks — either fix it to the Phase 1 name, or add the module to the architecture table.
 
-**The \`lens\` column takes the canonical lens name, in English, exactly as this guidance spells it** — \`Security\`, not "Segurança" or "SEG". The name is the join key: matrices from different projects only aggregate if the lens is written the same way in all of them.
+**The \`lens\` column takes the canonical lens name, in English, exactly as this guidance spells it** — \`Security\`, not "Segurança" or "SEG"; \`Sustainability / Proportionality\`, not \`Sustainability\`. The name is the join key: matrices from different projects only aggregate if the lens is written the same way in all of them, and a truncated name aggregates as a different lens without anyone noticing. The gate reads this column on 2→3: only case and the spacing around a slash vary, and a conditional lens must be in the set recorded for THAT round's \`## Iteração N\`. A finding that fits no lens at all takes the literal \`NENHUMA\` rather than the nearest lens.
 
 Use a consistent id prefix per lens within the project — \`P-\` for Security findings, \`A-\` for Assumptions, and so on — so an id alone says which lens produced it. **The prefix \`M-\` is RESERVED for modules (Phase 1's architecture table) — never use it for a finding; the Mechanical Engineering lens uses \`MEC-\`, not \`M-\`.** A finding carrying \`M-\` would be indistinguishable from a module row, and the gate discards it from the count for exactly that reason.
 

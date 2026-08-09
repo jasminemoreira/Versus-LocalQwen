@@ -22,6 +22,36 @@ export const VERSION_MARK = /V\s*\(?(\d+)\)?/i;
 /** A row whose first cell is a finding id: the coverage matrix. `M-` is a module. */
 const FINDING_ROW = /^\s*\|\s*((?!M-)[A-Za-z]{1,4}-\d+)\s*\|/;
 
+/** The frozen finding format: id | module | lens | severity | description. */
+const FINDING_CELLS = /^\s*\|\s*((?!M-)[A-Za-z]{1,4}-\d+)\s*\|([^|]*)\|([^|]*)\|/;
+
+export interface MatrixFinding {
+  id: string;
+  module: string;
+  /** Verbatim, so a rejection can quote what was actually written. */
+  lens: string;
+  /** The round whose heading this row sits under; null when there is none. */
+  iteration: number | null;
+}
+
+/**
+ * Every finding row, tagged with the round it was raised in. The lens comes from
+ * the 3rd cell of the frozen format — a column inserted before the id would break
+ * this and the row gate alike, which is why the format is frozen.
+ */
+export function parseMatrixFindings(text: string): MatrixFinding[] {
+  const out: MatrixFinding[] = [];
+  for (const p of sections(text, /^\s*#{1,6}\s*(?:itera[cç][aã]o|iteration)\s*(\d+)/i)) {
+    for (const line of p.body.split(/\r?\n/)) {
+      const m = FINDING_CELLS.exec(line);
+      if (m) {
+        out.push({ id: m[1], module: m[2].trim(), lens: m[3].trim(), iteration: p.n });
+      }
+    }
+  }
+  return out;
+}
+
 export interface MatrixIteration {
   /** null when the matrix carries no iteration heading at all. */
   iteration: number | null;
