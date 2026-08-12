@@ -37,32 +37,61 @@ export const recordTestOutcomeTool: Tool = {
           "The command that was run, e.g. 'pytest tests/test_tasks.py' or 'npm test -- consent'. " +
           "The suite or target matters: failures in different suites are counted separately.",
       },
+      outcome: {
+        type: "string",
+        enum: ["pass", "fail", "unknown"],
+        description:
+          "'pass' if the run was green, 'fail' if it was red, 'unknown' if the output could not be " +
+          "read as either — a crashed runner, a truncated log, a command that never produced a verdict. " +
+          "'unknown' is recorded and blocks the gate without counting towards S6: reporting it is always " +
+          "better than guessing. Report honestly — a false pass hides the loop from you, not from the tests.",
+      },
       failed: {
         type: "boolean",
-        description: "true if the run failed, false if it passed. Report honestly — a false pass hides the loop from you, not from the tests.",
+        description: "Deprecated, kept for older callers: true means 'fail', false means 'pass'. Prefer `outcome`.",
       },
     },
-    required: ["command", "failed"],
+    required: ["command"],
   },
 };
 
 export function handleRecordTestOutcome(
   engine: StateEngine,
-  args: { command: string; failed: boolean }
+  args: { command: string; outcome?: "pass" | "fail" | "unknown"; failed?: boolean }
 ): string {
   const state = engine.getPhaseState();
   if (!state) {
     return JSON.stringify({ error: "Project not initialized. Call init_project first." });
   }
 
-  const { count } = engine.recordTestOutcome(args.command ?? "", args.failed);
+  // `outcome` wins; `failed` still answers for callers written against the old
+  // schema. With neither, the run is inconclusive by definition — which is what
+  // `unknown` is for, and better than defaulting to either verdict.
+  const outcome: "pass" | "fail" | "unknown" =
+    args.outcome ?? (args.failed === undefined ? "unknown" : args.failed ? "fail" : "pass");
+
+  const { count } = engine.recordTestOutcome(args.command ?? "", outcome, {
+    source: "mcp-tool",
+    note: "reported by the model; this build has no hook observing an exit code",
+  });
+
+  if (outcome === "unknown") {
+    return JSON.stringify({
+      recorded: "unknown",
+      undiagnosedFailures: count,
+      threshold: LOOP_FAILURE_THRESHOLD,
+      note:
+        "Recorded as inconclusive. It does not satisfy tests_passing and does not count towards S6. " +
+        "Run the suite again and report 'pass' or 'fail' once the output says which.",
+    });
+  }
   // Ask the safeguard, not the counter. isLoopBlocked() only knows the count,
   // so before Phase 5 it would claim a violation that check_safeguard denies —
   // and two answers to the same question is worse than either answer.
   const blocked = engine.checkSafeguard("S6").status === "violated";
   const remaining = Math.max(0, LOOP_FAILURE_THRESHOLD - count);
 
-  if (!args.failed) {
+  if (outcome === "pass") {
     return JSON.stringify({
       recorded: "pass",
       undiagnosedFailures: 0,

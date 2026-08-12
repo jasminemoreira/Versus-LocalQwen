@@ -1,5 +1,78 @@
 # Changelog
 
+## [0.9.0] - 2026-08-09
+
+Applies `APLICAR-POS-LOTE-COMPLETO-v0.15-a-v0.16.2-NOS-OUTROS-BUILDS.md`, Parts I
+to VI, from Versus for Claude v0.15.0–v0.16.2. Minor bump: `record_test_outcome`
+changed shape, two new gates on 6→7, and the lens triggers the guidance renders.
+
+### Added
+
+- **`unknown` is a real test outcome (I.1).** `recordTestOutcome(command, outcome,
+  provenance?)` takes `"pass" | "fail" | "unknown"`. An inconclusive run is
+  RECORDED — so a stale `fail` cannot stay frozen as the last thing anyone knew —
+  and then does nothing else: it satisfies no gate and does not feed S6. Counting
+  it as a failure would punish an unreadable output; ignoring it would leave the
+  wrong verdict standing.
+- **`lastTestOutcome` in `get_phase_state` (I.2).** One line, and it removes the
+  reason a model had to open `state.json` by hand to see why the gate refused.
+- **The `tests_passing` refusal quotes the record (I.3).** It now says whether
+  nothing was recorded for this phase at all, or the last run failed, or could not
+  be classified — with command, time and exit code when known. Those call for
+  opposite next moves and used to read identically.
+- **`verifiedBy` on the two `verify:` criteria (II).** Written by the engine after
+  the gates pass and before the transition commits, via
+  `stampVerificationProvenance(phase)`. `nominal: false` marks a degraded path.
+  No new criterion — the two that exist gained provenance.
+- **Cross gate 6→7: every 🔴 answered (III.1).** Each critical in the matrix must
+  be referenced in `specs/validation/critical-coverage.md`, by a test or a stated
+  reason. Skipped entirely when the matrix has no 🔴.
+- **Conditional gate 6→7: numbered premises answered (III.2).** Engages only where
+  `architecture.md` numbers its premises (`A-1`, `P-A8`); each id must appear in
+  `specs/validation/premise-coverage.md`. Where premises are prose there is no id
+  and nothing is demanded — about half the corpus writes them that way, and a gate
+  cannot impose a convention that was never agreed.
+
+### Changed
+
+- **Nine conditional-lens triggers rewritten (V).** Each now states the condition
+  its own central question implies, with the examples demoted to illustration:
+  RES, MIG, ETI, PRO, OBS, CTR, JOG, LIN, MEC. SUS, UI/UX and GOV already had the
+  form from 0.7.3 and were not touched. The warrant is measured: the narrow
+  phrasing induced a reading error, and the finding was that the FORM does not
+  generalise while the CONTENT does.
+- **Phase 6 guidance (III.3, IV).** Asks for the two coverage files; recommends
+  mutation-style detection checks (recommended, not gated — the tooling is not
+  universal); measure per stage before optimizing; a micro-check is something you
+  RUN, not something you read; when a test changes, say which scenario it builds,
+  not just which assertion moved.
+- **Phase 1 guidance (III.4).** Number the premises the design leans on, and give
+  every `## V(N)` the COMPLETE module table rather than a delta — a delta reads
+  identically to a design where the omitted modules are gone.
+
+### Notes
+
+- **Part I is partly out of scope here, by construction.** I.4 (classify by
+  `exit_code`) and I.5 (hook provenance: `toolUseId`, `sessionId`, `outputSha256`)
+  read a `PostToolUse` payload. This build has no hook — it runs in VS Code chat,
+  not a CLI — so there is no exit code to observe. What landed instead: the tool
+  stamps `provenance: { source: "mcp-tool", note: "…no hook observing an exit
+  code" }`, and `verifiedBy.nominal` is therefore `false` for every `test-pass`
+  here. That is the honest reading, and it is exactly the legible-contour goal of
+  I.5: a reader can tell the model's word from an observed exit code. I.6 stays
+  deferred as upstream left it.
+- `record_test_outcome` keeps accepting the old `failed` boolean, so a caller
+  written against the previous schema still works. With neither field the run is
+  recorded as `unknown` rather than defaulting to a verdict.
+- Part VI needs no code: `duplica` intra-lens stays a declared limitation (four
+  judges marked 71/87/153/340 pairs, κ 0.110–0.338 — a gate would decide
+  mechanically what four readers decide very differently); fixing the lens set
+  across iterations stays rejected; the zero-occurrence forms stay declared.
+- No batch project is discarded. This is instrument reinforcement plus a taxonomy
+  correction for future work; the archived results (X, DOI 10.5281/zenodo.21908907)
+  are not invalidated, and the activation numbers are Y measured against the
+  archived corpus, not a new verdict on Phase 2.
+
 ## [0.8.2] - 2026-08-09
 
 Standalone patch `APLICAR-GATE-DE-SEVERIDADE-NOS-OUTROS-BUILDS.md`, from Versus

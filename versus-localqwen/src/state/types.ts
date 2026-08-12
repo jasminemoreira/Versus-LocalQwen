@@ -23,7 +23,7 @@ export interface PhaseState {
   /** One entry per critique round — an array, never an accumulated record. */
   activatedLenses?: LensActivation[];
   /** Last test run the engine witnessed, via record_test_outcome. Gates tests_passing. */
-  lastTestOutcome?: { outcome: "pass" | "fail"; phase: number; at: string };
+  lastTestOutcome?: TestOutcome;
   lastPhaseStateCheck?: string;  // ISO timestamp — gateway guard for smaller models
   createdAt: string;             // ISO timestamp
   updatedAt: string;
@@ -60,6 +60,55 @@ export interface LensActivation {
   iteration: number;                                    // 1 = first pass through Phase 2
   againstVersion: number;                               // the architecture V(N) it was decided against
   recordedAt: string;                                   // ISO
+}
+
+/**
+ * What is known about a reported test run.
+ *
+ * `unknown` is a real outcome, not a missing one: a run whose result could not be
+ * determined must overwrite a stale `fail` rather than leave it frozen, and it
+ * must neither satisfy the tests_passing gate nor feed the S6 counter. Treating
+ * "could not tell" as "failed" is what froze the gate green or red on the wrong
+ * evidence.
+ */
+export interface TestOutcome {
+  outcome: "pass" | "fail" | "unknown";
+  phase: number;
+  at: string;
+  command?: string;
+  provenance?: TestProvenance;
+}
+
+/**
+ * Where the outcome came from. It does not make a report unforgeable — nothing
+ * short of running the suite ourselves would — it makes the shortcut legible:
+ * a reader can see whether an exit code was involved or only the model's word.
+ */
+export interface TestProvenance {
+  /** How the outcome reached the engine. */
+  source: "mcp-tool" | "hook";
+  /** Process exit code, when something observed one. 0 is the only nominal pass. */
+  exitCode?: number;
+  /** Free note — e.g. that this build has no hook to observe an exit code. */
+  note?: string;
+}
+
+/**
+ * Written by the engine when a `verify:` criterion passes its gate, so the
+ * checkbox carries how it was satisfied and not just that it was.
+ *
+ * `nominal: false` marks a degraded path — a pass with no exit code behind it, or
+ * a lens set accepted through the prose fallback. Both are allowed; both should be
+ * visible afterwards rather than indistinguishable from the strong path.
+ */
+export interface VerificationProvenance {
+  /** Which evidence path satisfied the criterion. */
+  path: string;
+  nominal: boolean;
+  at: string;
+  note?: string;
+  /** A short quote of the evidence, for reading the record without the artifacts. */
+  snapshot?: string;
 }
 
 /** Structured technical context — survives model switches */
@@ -116,6 +165,8 @@ export interface ExitCriterionState {
   criterion: string;
   met: boolean;
   details?: string;
+  /** Only on criteria with a `verify:`, and only once their gate has passed. */
+  verifiedBy?: VerificationProvenance;
 }
 
 export interface SafeguardState {

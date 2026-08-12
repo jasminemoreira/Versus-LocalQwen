@@ -100,6 +100,9 @@ export function handleGetPhaseState(engine: StateEngine): string {
     decisionsCount: state.decisions.length,
     recentDecisions,
     safeguards: state.safeguards.map((s) => ({ id: s.id, status: s.status })),
+    // What the tests_passing gate will read. Without it the model had to open
+    // state.json by hand to find out why the gate refused.
+    lastTestOutcome: state.lastTestOutcome ?? null,
     updatedAt: state.updatedAt,
   };
 

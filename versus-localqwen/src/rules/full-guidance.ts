@@ -391,6 +391,10 @@ ALSO write the architecture document to \`specs/technical/architecture.md\`. It 
 
 The \`M-\\d+\` id exists only to make the row recognisable to the gate. **The stable key across phases is the module name in column 2.** Phase 2's coverage matrix and Phase 5's implementation must use those same names — a module called \`rate-limiter\` here and \`quota\` there is two artifacts that cannot be joined.
 
+**Number the premises the design leans on** — \`A-1\`, \`A-2\`, … — instead of leaving them in prose. A numbered premise is one Phase 6 can come back and check by id; an unnumbered one is a claim nobody can point at afterwards, which is how an assumption fails silently. Phase 6 asks for a \`premise-coverage.md\` keyed on these ids, and only where they exist.
+
+**Each \`## V(N)\` section carries the COMPLETE module table, not a delta.** Writing only what changed reads identically to writing a design where the omitted modules are gone, and nothing can tell the two apart afterwards. Repeating the unchanged rows is cheap; an ambiguous version is not.
+
 Assumptions and anything the table cannot hold go in prose below it. advance_phase to Phase 2 is BLOCKED until the file exists and holds at least one module row. The engine checks the shape, not whether the decomposition is good — that judgement stays yours.
 - constraints: hard constraints that must survive model switches (e.g., ["Copilot-only", "no external auth providers"])
 This structured context is injected before every message in all phases — it is the primary mechanism for enforcing P1 decisions across sessions.`;
@@ -790,6 +794,29 @@ The content MUST follow this structure:
 - NOT COVERED: [list of spec items not testable automatically + justification]
 - NEGATIVE TESTS: [count positive / count negative / ratio]
 - GAPS: [any spec where test exists but does NOT verify the exact criterion]
+
+### Step 4.5 — Re-verify what earlier phases decided (the 6→7 gate reads these):
+
+**Every 🔴 from the coverage matrix, answered (MANDATORY — blocks 6→7).** Write \`specs/validation/critical-coverage.md\` with one entry per critical finding, referenced **by its matrix id**, saying either which test covers it or why it needs none:
+
+\`\`\`
+| finding | test | verdict |
+|---------|------|---------|
+| P-01 | test_key_absent_from_denial_log | covered — asserts the key never reaches the log |
+| ARQ-3 | — | accepted as risk: the coupling is inside one module, recorded in P3 |
+\`\`\`
+
+A 🔴 that reached Phase 6 unmentioned is a critical nobody decided about. The gate skips this file entirely if the matrix has no 🔴.
+
+**Every NUMBERED premise, answered (blocks 6→7 only where premises carry ids).** If \`specs/technical/architecture.md\` numbers its premises (\`A-1\`, \`P-A8\`), write \`specs/validation/premise-coverage.md\` with one entry per id: how Phase 6 checked it, or why it cannot be checked. A numbered premise is a claim the design leaned on, and leaving it unexamined is how an assumption fails silently. Where premises are prose there is no id to check and this is not asked for — the numbering is worth doing, not a convention the gate imposes.
+
+**Detection power (RECOMMENDED, not gated).** A suite that passes tells you the tests agree with the code, not that either is right. Where the tooling allows it, break something on purpose — invert a comparison, drop a guard, return a constant — and check that some test goes red. A mutation nobody catches marks an untested path, whatever the coverage percentage says. Mutation tooling is not universal, so this is a recommendation; the reasoning applies by hand too.
+
+**Measure per stage before optimizing.** If something is slow, time the stages before changing any of them. Optimizing the stage you guessed is how a session spends an hour on the wrong one.
+
+**A micro-check is something you RUN, not something you read.** "This obviously works" about three lines is the same confidence that wrote the bug. Run the three lines.
+
+**Fixing a test means saying which scenario it builds.** When a test changes, record what state it sets up and why that is the right state — not just which assertion moved. A test edited into agreement with the code is not a test any more, and the scenario is the only part of it that says whether the edit was legitimate.
 
 ### Step 5 — Manual Exploratory Testing (MANDATORY before Phase 7):
 **⚠️ IMPORTANT: Manual testing MUST be performed by the human user, not the AI. The AI CANNOT simulate manual testing mentally and mark it as done. The AI must present the test plan, record status, and WAIT for the user to return with results before marking manual_testing as met or advancing.**

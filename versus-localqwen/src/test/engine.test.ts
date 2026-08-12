@@ -22,6 +22,8 @@ import {
   resolveBudgetFloor,
 } from "../ollama/client";
 import { handleGetPhaseGuidance } from "../mcp/tools/guidance-tools";
+import { handleGetPhaseState } from "../mcp/tools/state-tools";
+import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
 import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
 import {
   CONDITIONAL_LENSES,
@@ -671,11 +673,11 @@ function engineInPhase5(): { engine: StateEngine; tmp: string } {
 test("only failures accumulate — a passing run clears the counter", () => {
   const { engine, tmp } = engineInPhase5();
   try {
-    assert.strictEqual(engine.recordTestOutcome("pytest tests/", true).count, 1);
-    assert.strictEqual(engine.recordTestOutcome("pytest tests/", true).count, 2);
+    assert.strictEqual(engine.recordTestOutcome("pytest tests/", "fail").count, 1);
+    assert.strictEqual(engine.recordTestOutcome("pytest tests/", "fail").count, 2);
     // The green run is the end of the work, never a loop. Counting it would make
     // S4 (execute and verify) impossible to satisfy.
-    assert.strictEqual(engine.recordTestOutcome("pytest tests/", false).count, 0);
+    assert.strictEqual(engine.recordTestOutcome("pytest tests/", "pass").count, 0);
     assert.ok(!engine.isLoopBlocked());
   } finally {
     cleanTempWorkspace(tmp);
@@ -686,7 +688,7 @@ test("three undiagnosed failures violate S6", () => {
   const { engine, tmp } = engineInPhase5();
   try {
     for (let i = 0; i < LOOP_FAILURE_THRESHOLD; i++) {
-      engine.recordTestOutcome("pytest tests/test_tasks.py", true);
+      engine.recordTestOutcome("pytest tests/test_tasks.py", "fail");
     }
     assert.ok(engine.isLoopBlocked());
     const s6 = engine.checkSafeguard("S6");
@@ -701,7 +703,7 @@ test("a recorded diagnosis clears the counter — the escape hatch is honoured",
   const { engine, tmp } = engineInPhase5();
   try {
     for (let i = 0; i < LOOP_FAILURE_THRESHOLD; i++) {
-      engine.recordTestOutcome("pytest tests/", true);
+      engine.recordTestOutcome("pytest tests/", "fail");
     }
     assert.ok(engine.isLoopBlocked());
 
@@ -710,7 +712,7 @@ test("a recorded diagnosis clears the counter — the escape hatch is honoured",
     assert.strictEqual(engine.checkSafeguard("S6").status, "warning");
 
     // Aliases must work too, and an unrelated category must not clear it.
-    engine.recordTestOutcome("pytest tests/", true);
+    engine.recordTestOutcome("pytest tests/", "fail");
     engine.recordDecision(5, "scope", "unrelated");
     assert.strictEqual(engine.getLoopCounter().count, 1);
     engine.recordDecision(5, "root-cause", "missing null guard");
@@ -725,9 +727,9 @@ test("failures in different suites do not compound", () => {
   try {
     // S6 speaks of iterations on the same module, so the suite argument must be
     // part of the pattern — otherwise four unrelated suites trip one counter.
-    engine.recordTestOutcome("npm test -- consent", true);
-    engine.recordTestOutcome("npm test -- link", true);
-    engine.recordTestOutcome("npm test -- export", true);
+    engine.recordTestOutcome("npm test -- consent", "fail");
+    engine.recordTestOutcome("npm test -- link", "fail");
+    engine.recordTestOutcome("npm test -- export", "fail");
     assert.ok(!engine.isLoopBlocked(), "three different suites are not a loop");
     assert.strictEqual(engine.getLoopCounter().count, 1);
   } finally {
@@ -739,7 +741,7 @@ test("a violated safeguard vetoes the transition and says which", () => {
   const { engine, tmp } = engineInPhase5();
   try {
     for (let i = 0; i < LOOP_FAILURE_THRESHOLD; i++) {
-      engine.recordTestOutcome("pytest tests/", true);
+      engine.recordTestOutcome("pytest tests/", "fail");
     }
     const result = engine.advancePhase(6);
     assert.ok(!result.ok, "S6 violated must veto the transition");
@@ -1094,14 +1096,14 @@ test("tests_passing needs a pass witnessed in this phase", () => {
     }
 
     // A failing run is a witnessed run, but not a passing one.
-    engine.recordTestOutcome("pytest", true);
+    engine.recordTestOutcome("pytest", "fail");
     const failed = engine.advancePhase(7);
     assert.ok(!failed.ok, "a failure must not satisfy the gate");
     if (!failed.ok) {
       assert.ok(failed.error.missingCriteria.some((m) => m.includes("no passing test run was witnessed")));
     }
 
-    engine.recordTestOutcome("pytest", false);
+    engine.recordTestOutcome("pytest", "pass");
     assert.ok(engine.advancePhase(7).ok, "a witnessed pass unblocks it");
   } finally {
     cleanTempWorkspace(tmp);
@@ -1111,7 +1113,7 @@ test("tests_passing needs a pass witnessed in this phase", () => {
 test("a pass witnessed in an earlier phase does not carry forward", () => {
   const { engine, tmp } = engineAt(5);
   try {
-    engine.recordTestOutcome("pytest", false);
+    engine.recordTestOutcome("pytest", "pass");
     const st = engine.getPhaseState()!;
     (st as any).currentPhase = 6;
     engine.recordDecision(6, "scope", "moved on");
@@ -1753,6 +1755,250 @@ test("the 19 canonical names are the ones the guidance teaches", () => {
   for (const lens of [...UNIVERSAL_LENSES, ...CONDITIONAL_LENSES]) {
     assert.ok(g.includes(lens), `the guidance must spell '${lens}' the way lenses.ts does`);
   }
+});
+
+
+// --- Post-batch: test-outcome integrity, provenance, Phase 6 re-verification ---
+
+console.log("\n=== Integrity Tests ===\n");
+
+test("an inconclusive run is recorded, satisfies nothing, and counts nothing", () => {
+  const { engine, tmp } = engineAt(6);
+  try {
+    // A stale failure must not survive as the last thing anyone knew...
+    engine.recordTestOutcome("pytest", "fail");
+    const before = engine.getPhaseState()!.loopCounter.count;
+    engine.recordTestOutcome("pytest", "unknown");
+    const t = engine.getPhaseState()!.lastTestOutcome!;
+    assert.strictEqual(t.outcome, "unknown", "it overwrites the stale fail");
+
+    // ...and it must not move S6 either way.
+    assert.strictEqual(engine.getPhaseState()!.loopCounter.count, before, "S6 does not count it");
+
+    markAll(engine, 6);
+    const blocked = engine.advancePhase(7);
+    assert.ok(!blocked.ok, "'could not tell' is not a pass");
+    if (!blocked.ok) {
+      assert.ok(
+        blocked.error.missingCriteria.some((m) => m.includes("could not be classified")),
+        "the refusal must distinguish unreadable from red"
+      );
+    }
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the tests_passing refusal quotes what is on record", () => {
+  const { engine, tmp } = engineAt(6);
+  try {
+    markAll(engine, 6);
+    const never = engine.advancePhase(7);
+    assert.ok(!never.ok);
+    if (!never.ok) {
+      assert.ok(
+        never.error.missingCriteria.some((m) => m.includes("Nothing has been recorded for this phase")),
+        "not observed and failed call for opposite next moves"
+      );
+    }
+
+    engine.recordTestOutcome("pytest -k consent", "fail");
+    const red = engine.advancePhase(7);
+    assert.ok(!red.ok);
+    if (!red.ok) {
+      const msg = red.error.missingCriteria.join(" ");
+      assert.ok(msg.includes("the last run failed"));
+      assert.ok(msg.includes("pytest -k consent"), "name the command it read");
+    }
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("get_phase_state exposes the last test outcome", () => {
+  engine.initProject("state", "outcome");
+  // Through the tool, which is what a model calls — and where provenance is set.
+  handleRecordTestOutcome(engine, { command: "npm test", outcome: "fail" });
+  const res = JSON.parse(handleGetPhaseState(engine));
+  assert.strictEqual(res.lastTestOutcome.outcome, "fail");
+  assert.strictEqual(res.lastTestOutcome.command, "npm test");
+  assert.strictEqual(res.lastTestOutcome.provenance.source, "mcp-tool");
+  assert.ok(res.lastTestOutcome.provenance.note.includes("no hook"));
+});
+
+test("record_test_outcome defaults to unknown rather than guessing a verdict", () => {
+  engine.initProject("tool", "outcome");
+  const res = JSON.parse(handleRecordTestOutcome(engine, { command: "pytest" } as any));
+  assert.strictEqual(res.recorded, "unknown");
+  // The old boolean still answers, for a caller written against the old schema.
+  const legacy = JSON.parse(handleRecordTestOutcome(engine, { command: "pytest", failed: false } as any));
+  assert.strictEqual(legacy.recorded, "pass");
+});
+
+test("a passing transition stamps HOW each verify criterion was satisfied", () => {
+  const { engine, tmp } = engineAt(6);
+  try {
+    engine.recordTestOutcome("pytest", "pass");
+    markAll(engine, 6);
+    assert.ok(engine.advancePhase(7).ok);
+
+    const stamped = engine
+      .getPhaseState()!
+      .exitCriteria.find((c) => c.phase === 6 && c.criterion === "tests_passing")!;
+    assert.ok(stamped.verifiedBy, "the checkbox must carry how, not only that");
+    assert.strictEqual(stamped.verifiedBy!.path, "test-pass");
+    // No hook on this host, so no exit code was observed: a degraded path, and
+    // it should read as one afterwards instead of like the strong path.
+    assert.strictEqual(stamped.verifiedBy!.nominal, false);
+    assert.ok(stamped.verifiedBy!.note!.includes("no hook"));
+    assert.ok(stamped.verifiedBy!.snapshot!.includes("pytest"));
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the lens criterion records whether the structured path or the fallback was used", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    markAll(e, 2);
+    declareLenses(e);
+    writeCoverageMatrix(tmp);
+    assert.ok(e.advancePhase(3).ok);
+    const strong = e
+      .getPhaseState()!
+      .exitCriteria.find((c) => c.phase === 2 && c.criterion === "activated_lenses_recorded")!;
+    assert.strictEqual(strong.verifiedBy!.nominal, true);
+    assert.ok(strong.verifiedBy!.snapshot!.includes("Resilience"));
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+/** Phase 6 with the artifacts of a project that raised criticals. */
+function engineAtPhase6WithCriticals(): { engine: StateEngine; tmp: string } {
+  const { engine: e, tmp } = engineAt(6);
+  writeArchitectureDoc(tmp);
+  writeCoverageMatrix(tmp);
+  e.recordTestOutcome("pytest", "pass");
+  markAll(e, 6);
+  return { engine: e, tmp };
+}
+
+test("a critical with nothing said about it blocks 6→7", () => {
+  const { engine: e, tmp } = engineAtPhase6WithCriticals();
+  try {
+    const blocked = e.advancePhase(7);
+    assert.ok(!blocked.ok, "P-01 is 🔴 and no file answers for it");
+    if (!blocked.ok) {
+      const msg = blocked.error.missingCriteria.join(" ");
+      assert.ok(msg.includes("critical-coverage.md"));
+      assert.ok(msg.includes("P-01"), "name the critical it wants answered");
+    }
+
+    writeSpecArtifact(
+      tmp,
+      "validation/critical-coverage.md",
+      [
+        "| finding | test | verdict |",
+        "|---------|------|---------|",
+        "| P-01 | test_key_absent_from_denial_log | covered |",
+      ].join("\n")
+    );
+    assert.ok(e.advancePhase(7).ok, "an answer per critical unblocks it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("no critical in the matrix means nothing to answer for", () => {
+  const { engine: e, tmp } = engineAt(6);
+  try {
+    // Same matrix minus the 🔴 row: the gate must not invent an obligation.
+    writeCoverageMatrix(tmp, [
+      "## Iteração 1 — V(1)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| P-02 | store | Assumptions | 🟡 | assumes the counter never wraps |",
+    ].join("\n"));
+    e.recordTestOutcome("pytest", "pass");
+    markAll(e, 6);
+    assert.ok(e.advancePhase(7).ok);
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("numbered premises are answered; prose premises are not demanded", () => {
+  const { engine: e, tmp } = engineAt(6);
+  try {
+    writeCoverageMatrix(tmp, [
+      "## Iteração 1 — V(1)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| P-02 | store | Assumptions | 🟡 | assumes the counter never wraps |",
+    ].join("\n"));
+    e.recordTestOutcome("pytest", "pass");
+    markAll(e, 6);
+
+    // Prose premises: no id to check, so the gate stays quiet rather than
+    // imposing a numbering convention half the corpus never agreed to.
+    writeArchitectureDoc(tmp, MODULE_TABLE + "\n\nWe assume the clock is monotonic.");
+    assert.ok(e.advancePhase(7).ok, "prose premises must not block");
+
+    // Numbered premises: now there is something to point at.
+    (e.getPhaseState() as any).currentPhase = 6;
+    writeArchitectureDoc(tmp, MODULE_TABLE + "\n\nA-1: the clock is monotonic.\nA-2: keys are opaque.");
+    const blocked = e.advancePhase(7);
+    assert.ok(!blocked.ok, "an id the design leaned on must be answered");
+    if (!blocked.ok) {
+      const msg = blocked.error.missingCriteria.join(" ");
+      assert.ok(msg.includes("premise-coverage.md"));
+      assert.ok(msg.includes("A-1") && msg.includes("A-2"));
+    }
+
+    writeSpecArtifact(tmp, "validation/premise-coverage.md",
+      "A-1: checked by test_clock_never_goes_back.\nA-2: not checkable — keys come from the caller.");
+    assert.ok(e.advancePhase(7).ok);
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the nine widened triggers are the ones rendered", () => {
+  const g = getCompleteGuidance();
+  // Each of the nine states the condition its own central question implies, with
+  // the examples demoted — that is what stopped estimators reading the narrow list
+  // as the requirement.
+  const marks = [
+    "outside its own process that can fail, stall",           // Resilience
+    "existing, relied-upon state or contract across a change", // Migration
+    "consequential decision whose effect falls on people",     // Ethical
+    "states, handoffs, or exception paths",                    // Process
+    "would need to tell WHY without changing code",            // Observability
+    "regulates state over time rather than only reacting",     // Control
+    "a self-interested one could deviate",                     // Game Theory
+    "two correct readings could diverge",                      // Linguistics
+    "depends on something that can vary",                      // Mechanical
+  ];
+  for (const m of marks) assert.ok(g.includes(m), `missing trigger text: ${m}`);
+  // The three from 0.7.3 are untouched.
+  assert.ok(g.includes("Any surface a PERSON operates"));
+  assert.ok(g.includes("whose cost grows with use"));
+  assert.ok(g.includes("This is a SYSTEM property"));
+});
+
+test("Phase 6 guidance asks for the two coverage files, Phase 1 for numbered premises", () => {
+  const g = getCompleteGuidance();
+  assert.ok(g.includes("specs/validation/critical-coverage.md"));
+  assert.ok(g.includes("specs/validation/premise-coverage.md"));
+  assert.ok(g.includes("Number the premises the design leans on"));
+  assert.ok(g.includes("COMPLETE module table, not a delta"));
+  // Part IV, the practices that were already spontaneous.
+  assert.ok(g.includes("A micro-check is something you RUN"));
+  assert.ok(g.includes("Measure per stage before optimizing"));
+  assert.ok(g.includes("which scenario it builds"));
 });
 
 console.log("\n=== All tests completed ===\n");

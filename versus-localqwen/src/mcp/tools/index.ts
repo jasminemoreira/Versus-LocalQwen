@@ -135,7 +135,10 @@ async function dispatch(
     case "record_activated_lenses":
       return handleRecordActivatedLenses(engine, args as { conditional?: unknown; notActivated?: unknown });
     case "record_test_outcome":
-      return handleRecordTestOutcome(engine, args as { command: string; failed: boolean });
+      return handleRecordTestOutcome(
+        engine,
+        args as { command: string; outcome?: "pass" | "fail" | "unknown"; failed?: boolean }
+      );
     case "get_phase_state":
       return handleGetPhaseState(engine);
     case "get_decisions":

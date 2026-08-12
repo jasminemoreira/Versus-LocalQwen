@@ -70,7 +70,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "What happens when an external dependency fails, responds slowly, or returns unexpected data?",
     failureClass: "Cascading failures, retry storms, partial outages",
     trigger:
-      "External dependencies (APIs, DBs, queues, third-party services)",
+      "The system depends on anything outside its own process that can fail, stall, or return unexpected data — a network service, a database, a queue, a file, a subprocess. Apply the central question wherever such a boundary exists; the list is illustrative, not the requirement.",
     group: "situational",
   },
   {
@@ -86,7 +86,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "What breaks during the transition from old to new? Is there a rollback path?",
     failureClass: "Data loss in migration, functional regression vs. legacy, impossible rollback",
     trigger:
-      "Replacing or modifying existing production system",
+      "The work must carry an existing, relied-upon state or contract across a change — a populated store, a format other code already reads, a live interface consumers depend on — that has to survive or roll back. Greenfield work, and a store only this version ever reads, do not activate.",
     group: "situational",
   },
   {
@@ -102,7 +102,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "Who is potentially harmed? Are there audit, correction, and transparency mechanisms?",
     failureClass: "Algorithmic bias, digital exclusion, automated decisions without human recourse",
     trigger:
-      "Automated decisions about people (scoring, classification, moderation)",
+      "The system makes or automates a consequential decision whose effect falls on people — directly, or through an entity they depend on (a budget cut borne by those it funds, an access denial, a flag acted on). Apply the central question — who can be harmed? — without requiring the decision be nominally \"about people\". A system that decides nothing consequential about anyone stays out.",
     group: "situational",
   },
   {
@@ -110,7 +110,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "Are processes, state transitions, actor responsibilities, and exception paths complete?",
     failureClass: "Orphaned states, ambiguous handoffs, missing actors, happy-path bias",
     trigger:
-      "Multi-actor flows, state machines, or business processes",
+      "The system has a process with states, handoffs, or exception paths — one actor or many. Apply the central question wherever a flow can be left incomplete; \"multi-actor\" is one case, not the requirement.",
     group: "situational",
   },
   {
@@ -126,7 +126,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "Can degradation be detected and incidents diagnosed in production without code changes?",
     failureClass: "Opaque systems where nobody can figure out why it failed",
     trigger:
-      "Production systems with operational requirements",
+      "The system runs somewhere it can degrade or fail after it ships, and someone would need to tell WHY without changing code. Apply the central question wherever a running system can fail silently; it does not require a formal \"production\" or \"ops\" label.",
     group: "situational",
   },
   {
@@ -134,7 +134,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "Where does the system generate error signal and correct? Risk of oscillation or state drift?",
     failureClass: "Systems that react to events but don't regulate state",
     trigger:
-      "State synchronization, runtime configuration, feedback loops, systems that must converge to a target",
+      "The system regulates state over time rather than only reacting — state synchronization, a runtime setting that changes behavior, a retry/backoff, a self-correcting or feedback-driven loop that can oscillate or drift. Apply the central question wherever such regulation exists; the list is illustrative.",
     group: "dtl",
   },
   {
@@ -142,7 +142,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "Do actors have aligned incentives? Where does the system assume cooperation but may encounter strategic defection?",
     failureClass: "Architectures that collapse under adversarial/strategic behavior",
     trigger:
-      "Multiple independent actors, public API consumed externally, marketplace or multi-tenant systems",
+      "The design assumes some actor — a user, a client, an integrator, an operator — behaves as intended, and a self-interested one could deviate to its own benefit. Apply the central question wherever cooperation is assumed rather than enforced; a public API or marketplace is one case, not the requirement.",
     group: "dtl",
   },
   {
@@ -150,7 +150,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "Is the interface contract unambiguous? Can two correct implementations be mutually incompatible?",
     failureClass: "Protocol ambiguity — two correct implementations that are mutually incompatible",
     trigger:
-      "Inter-component communication contracts, interfaces defined between independent teams",
+      "Any contract two parties must agree on — a function signature, a message format, a protocol, a file schema — where two correct readings could diverge. Apply the central question wherever a contract can be read two ways; it does not require separate teams.",
     group: "dtl",
   },
   {
@@ -158,7 +158,7 @@ export const CONDITIONAL_LENS_DEFS: LensDef[] = [
     question: "Where are the tolerances? Does the system tolerate variation or only work at exact specification?",
     failureClass: "Rigid coupling disguised as tolerance — fails on small variations",
     trigger:
-      "Module maintenance, long-lived systems, technical debt, systems expected to evolve or be replaced",
+      "The system depends on something that can vary — a dependency version, an environment, an input range, a load — and could fail on small deviations. Apply the central question wherever variation is possible, not only in long-lived or maintenance-heavy systems.",
     group: "dtl",
   },
 ];
