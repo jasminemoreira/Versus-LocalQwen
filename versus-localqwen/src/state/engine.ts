@@ -719,10 +719,12 @@ export class StateEngine {
       if (def.verify === "test-pass" && !this.witnessedTestPass(phase)) {
         out.push(
           `[Phase ${phase}] ${def.criterion}: no passing test run was witnessed in this phase. ` +
-          `${this.testOutcomeSummary(phase)} Run the suite and report it with ` +
-          `record_test_outcome(command, outcome='pass') — this host has no hook watching your shell, ` +
-          `so an unreported run is an unwitnessed one. S4: never assume tests passed, execute and ` +
-          `verify. Marking the criterion met is not enough.`
+          `${this.testOutcomeSummary(phase)} Run the suite with the exit status appended — ` +
+          `\`<your command>; echo "VERSUS_TEST_EXIT=$?"\` — and report that number as ` +
+          `record_test_outcome(command, exit_code=<n>). $? comes from the shell, so it decides the ` +
+          `verdict whatever language the runner prints in, and 0 is the only pass. This host has no ` +
+          `hook watching your shell, so an unreported run is an unwitnessed one. S4: never assume ` +
+          `tests passed, execute and verify. Marking the criterion met is not enough.`
         );
       }
     }
@@ -915,14 +917,18 @@ export class StateEngine {
         // Nominal means an exit code was observed and was 0. This build has no
         // hook watching the shell, so a pass is the model's word — allowed, and
         // worth being able to tell apart later.
+        // Nominal means an exit status decided this and it was 0 — from the
+        // harness, or relayed from the command's own echo. A verdict read off the
+        // output instead is the degraded path, because reading depends on the
+        // output's language and format and the exit status does not.
         const nominal = t?.provenance?.exitCode === 0;
         entry.verifiedBy = {
-          path: "test-pass",
+          path: nominal ? `test-pass/exit-${t!.provenance!.exitSource ?? "unknown"}` : "test-pass",
           nominal,
           at,
           note: nominal
             ? undefined
-            : "pass reported without an observed exit code (no hook on this host)",
+            : "pass classified without an exit status — no VERSUS_TEST_EXIT was reported",
           snapshot: t ? `${t.outcome} — ${t.command ?? "(no command)"} @ ${t.at}` : undefined,
         };
       }

@@ -87,8 +87,14 @@ export interface TestOutcome {
 export interface TestProvenance {
   /** How the outcome reached the engine. */
   source: "mcp-tool" | "hook";
-  /** Process exit code, when something observed one. 0 is the only nominal pass. */
+  /** Process exit code, when one was available. 0 is the only nominal pass. */
   exitCode?: number;
+  /**
+   * Where that number came from. `harness` = the tool result carried it;
+   * `echo` = the command printed VERSUS_TEST_EXIT=$? and it was relayed. Absent
+   * means no exit status was involved at all and the verdict is a judgement.
+   */
+  exitSource?: "harness" | "echo";
   /** Free note — e.g. that this build has no hook to observe an exit code. */
   note?: string;
 }

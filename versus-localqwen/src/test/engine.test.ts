@@ -1823,7 +1823,7 @@ test("get_phase_state exposes the last test outcome", () => {
   assert.strictEqual(res.lastTestOutcome.outcome, "fail");
   assert.strictEqual(res.lastTestOutcome.command, "npm test");
   assert.strictEqual(res.lastTestOutcome.provenance.source, "mcp-tool");
-  assert.ok(res.lastTestOutcome.provenance.note.includes("no hook"));
+  assert.ok(res.lastTestOutcome.provenance.note.includes("no exit status reported"));
 });
 
 test("record_test_outcome defaults to unknown rather than guessing a verdict", () => {
@@ -1850,7 +1850,7 @@ test("a passing transition stamps HOW each verify criterion was satisfied", () =
     // No hook on this host, so no exit code was observed: a degraded path, and
     // it should read as one afterwards instead of like the strong path.
     assert.strictEqual(stamped.verifiedBy!.nominal, false);
-    assert.ok(stamped.verifiedBy!.note!.includes("no hook"));
+    assert.ok(stamped.verifiedBy!.note!.includes("without an exit status"));
     assert.ok(stamped.verifiedBy!.snapshot!.includes("pytest"));
   } finally {
     cleanTempWorkspace(tmp);
@@ -1999,6 +1999,69 @@ test("Phase 6 guidance asks for the two coverage files, Phase 1 for numbered pre
   assert.ok(g.includes("A micro-check is something you RUN"));
   assert.ok(g.includes("Measure per stage before optimizing"));
   assert.ok(g.includes("which scenario it builds"));
+});
+
+test("an exit status decides the outcome, whatever language the output is in", () => {
+  engine.initProject("exit", "agnostic");
+  // Output in Portuguese: no English marker would match, and none needs to.
+  let res = JSON.parse(handleRecordTestOutcome(engine, {
+    command: 'npm test; echo "VERSUS_TEST_EXIT=$?"',
+    exit_code: 0,
+  } as any));
+  assert.strictEqual(res.recorded, "pass");
+  const t = engine.getPhaseState()!.lastTestOutcome!;
+  assert.strictEqual(t.provenance!.exitCode, 0);
+  assert.strictEqual(t.provenance!.exitSource, "echo");
+
+  res = JSON.parse(handleRecordTestOutcome(engine, { command: "pytest", exit_code: 1 } as any));
+  assert.strictEqual(res.recorded, "failure");
+  assert.strictEqual(engine.getPhaseState()!.lastTestOutcome!.outcome, "fail");
+});
+
+test("the exit status outranks a contradictory outcome field", () => {
+  engine.initProject("exit", "precedence");
+  // A model that says 'pass' while $? said 1 is reporting its reading, not the
+  // run. The number wins: it is the only signal that does not depend on reading.
+  handleRecordTestOutcome(engine, { command: "pytest", exit_code: 1, outcome: "pass" } as any);
+  assert.strictEqual(engine.getPhaseState()!.lastTestOutcome!.outcome, "fail");
+});
+
+test("a pass via exit status is nominal; one read off the output is not", () => {
+  const { engine, tmp } = engineAt(6);
+  try {
+    handleRecordTestOutcome(engine, { command: "npm test", exit_code: 0 } as any);
+    markAll(engine, 6);
+    assert.ok(engine.advancePhase(7).ok);
+    const v = engine
+      .getPhaseState()!
+      .exitCriteria.find((c) => c.phase === 6 && c.criterion === "tests_passing")!.verifiedBy!;
+    assert.strictEqual(v.nominal, true, "an exit status of 0 is the strong path");
+    assert.strictEqual(v.path, "test-pass/exit-echo");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the refusal teaches the echo, so the next run is classifiable", () => {
+  const { engine, tmp } = engineAt(6);
+  try {
+    markAll(engine, 6);
+    const blocked = engine.advancePhase(7);
+    assert.ok(!blocked.ok);
+    if (!blocked.ok) {
+      const msg = blocked.error.missingCriteria.join(" ");
+      assert.ok(msg.includes("VERSUS_TEST_EXIT=$?"), "the first refusal must correct the habit");
+      assert.ok(msg.includes("exit_code"));
+    }
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("the guidance makes the echo the standard invocation", () => {
+  const g = getCompleteGuidance();
+  assert.ok(g.includes('npm test; echo "VERSUS_TEST_EXIT=$?"'));
+  assert.ok(g.includes("Never modify the test runner"), "the antipattern must be named");
 });
 
 console.log("\n=== All tests completed ===\n");

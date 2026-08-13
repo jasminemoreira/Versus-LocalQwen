@@ -37,6 +37,15 @@ export const recordTestOutcomeTool: Tool = {
           "The command that was run, e.g. 'pytest tests/test_tasks.py' or 'npm test -- consent'. " +
           "The suite or target matters: failures in different suites are counted separately.",
       },
+      exit_code: {
+        type: "number",
+        description:
+          "The process exit status, if you have it. Get it language-independently by appending the " +
+          "echo to your command: `npm test; echo \"VERSUS_TEST_EXIT=$?\"` — then report the number " +
+          "printed. 0 is a pass, anything else a failure, in any language and any output format. " +
+          "When given, this decides the outcome and `outcome` is not needed. Do NOT modify the test " +
+          "runner to make its output easier to read: append the echo to the command instead.",
+      },
       outcome: {
         type: "string",
         enum: ["pass", "fail", "unknown"],
@@ -57,22 +66,33 @@ export const recordTestOutcomeTool: Tool = {
 
 export function handleRecordTestOutcome(
   engine: StateEngine,
-  args: { command: string; outcome?: "pass" | "fail" | "unknown"; failed?: boolean }
+  args: { command: string; exit_code?: number; outcome?: "pass" | "fail" | "unknown"; failed?: boolean }
 ): string {
   const state = engine.getPhaseState();
   if (!state) {
     return JSON.stringify({ error: "Project not initialized. Call init_project first." });
   }
 
-  // `outcome` wins; `failed` still answers for callers written against the old
-  // schema. With neither, the run is inconclusive by definition — which is what
-  // `unknown` is for, and better than defaulting to either verdict.
+  // Exit status first: it is the only signal that does not depend on the output
+  // being in a language or a format anything here recognises. Then `outcome`,
+  // then the old `failed` boolean. With none of them the run is inconclusive by
+  // definition — which is what `unknown` is for, and better than a default verdict.
+  const exitCode = typeof args.exit_code === "number" ? args.exit_code : undefined;
   const outcome: "pass" | "fail" | "unknown" =
-    args.outcome ?? (args.failed === undefined ? "unknown" : args.failed ? "fail" : "pass");
+    exitCode !== undefined
+      ? exitCode === 0
+        ? "pass"
+        : "fail"
+      : args.outcome ?? (args.failed === undefined ? "unknown" : args.failed ? "fail" : "pass");
 
   const { count } = engine.recordTestOutcome(args.command ?? "", outcome, {
     source: "mcp-tool",
-    note: "reported by the model; this build has no hook observing an exit code",
+    exitCode,
+    exitSource: exitCode !== undefined ? "echo" : undefined,
+    note:
+      exitCode !== undefined
+        ? "exit status relayed from the command's own echo; this host has no hook to capture it directly"
+        : "no exit status reported — the verdict is the model's reading of the output",
   });
 
   if (outcome === "unknown") {
@@ -82,7 +102,9 @@ export function handleRecordTestOutcome(
       threshold: LOOP_FAILURE_THRESHOLD,
       note:
         "Recorded as inconclusive. It does not satisfy tests_passing and does not count towards S6. " +
-        "Run the suite again and report 'pass' or 'fail' once the output says which.",
+        "Run the suite again with the exit status appended — `<your command>; echo \"VERSUS_TEST_EXIT=$?\"` " +
+        "— and report that number as exit_code. $? comes from the shell, so it works whatever language " +
+        "the runner prints in.",
     });
   }
   // Ask the safeguard, not the counter. isLoopBlocked() only knows the count,

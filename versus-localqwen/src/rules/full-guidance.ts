@@ -783,6 +783,17 @@ If P1 declared no UI module, skip this step. Proceed to Step 3.
 ### Step 3 — Write and Execute Tests:
 - specs/datasets → test against ground truth (if empty, generate synthetic data and deposit in specs/datasets)
 - Execute ALL tests. Read output carefully. Fix failures before proceeding.
+
+**Always append the exit status to the command** — this is the standard invocation, not an extra step:
+
+\`\`\`
+npm test; echo "VERSUS_TEST_EXIT=$?"
+pytest -q; echo "VERSUS_TEST_EXIT=$?"
+\`\`\`
+
+Then report that number: \`record_test_outcome(command=..., exit_code=<n>)\`. \`$?\` comes from the shell, so 0 means green and anything else red **in any language and any output format** — which reading the output does not. A verdict taken from the text is recorded as a degraded path, and one taken from a suite that printed in Portuguese is a coin flip.
+
+**Never modify the test runner to make its output easier to classify.** Appending the echo costs one clause; editing the runner changes the thing under test to please the instrument, and a suite rewritten to print recognisable words is no longer the suite the specs asked for.
 - After all automated tests pass, run the actual application/artifact and verify behavior end-to-end.
 
 ### Step 4 — Record Spec Coverage (MANDATORY):

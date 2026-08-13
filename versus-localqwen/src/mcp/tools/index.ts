@@ -120,6 +120,7 @@ function sanitize(args: Record<string, unknown>): Record<string, unknown> {
   if ("planned_chars" in out) out.planned_chars = toNumber(out.planned_chars);
   if ("failed" in out) out.failed = toBoolean(out.failed);
   if ("conditional" in out) out.conditional = toStringArray(out.conditional);
+  if ("exit_code" in out) out.exit_code = toNumber(out.exit_code);
   return out;
 }
 
@@ -137,7 +138,12 @@ async function dispatch(
     case "record_test_outcome":
       return handleRecordTestOutcome(
         engine,
-        args as { command: string; outcome?: "pass" | "fail" | "unknown"; failed?: boolean }
+        args as {
+          command: string;
+          exit_code?: number;
+          outcome?: "pass" | "fail" | "unknown";
+          failed?: boolean;
+        }
       );
     case "get_phase_state":
       return handleGetPhaseState(engine);

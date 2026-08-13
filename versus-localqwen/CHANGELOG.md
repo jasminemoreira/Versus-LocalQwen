@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.9.1] - 2026-08-09
+
+Applies `APLICAR-CLASSIFICACAO-DE-TESTE-AGNOSTICA-NOS-OUTROS-BUILDS.md`, from
+Versus for Claude 0.16.3. It corrects I.4 (0.9.0), which rested on a false
+assumption about the harness payload.
+
+### Added
+
+- **`record_test_outcome` takes `exit_code`, and it outranks everything else.**
+  The guidance now teaches the exit status as the standard invocation —
+  `npm test; echo "VERSUS_TEST_EXIT=$?"` — and the number is reported back. `$?`
+  comes from the shell, so 0 means green and anything else red in any language and
+  any output format, which reading the output does not. Precedence: `exit_code` →
+  `outcome` → the legacy `failed` → `unknown`.
+- **`provenance.exitSource`** (`"harness" | "echo"`), so a relayed number is
+  distinguishable from one a harness captured.
+
+### Changed
+
+- **`verifiedBy.nominal` for `test-pass` now means an exit status decided it and
+  was 0**, from either source; `path` becomes `test-pass/exit-echo`. A verdict read
+  off the output is the degraded path, because reading depends on the output's
+  language and the exit status does not. Before this, `nominal` could never be true
+  on this build at all.
+- **The `tests_passing` refusal teaches the echo form.** The first `unknown` or
+  failure corrects the habit, and because an inconclusive run does not freeze
+  (0.9.0, I.1), the re-run is the one that counts.
+- **Phase 6 guidance: never modify the test runner to make its output easier to
+  classify.** Appending the echo costs one clause; editing the runner changes the
+  thing under test to please the instrument.
+
+### Notes
+
+- **Scope here is smaller than the spec's, and for a reason it states.** The patch
+  is a hook patch, and this build has no hook — it runs in VS Code chat, not a CLI,
+  so there is no `PostToolUse` payload and no `detectExitCode` to add. What lands is
+  the language-agnostic half: the number reaches the engine through the tool
+  instead of through a hook reading stdout.
+- **Verified against real records, as the patch insists.** Across the live
+  `state.json` files under `INDT/`: every `lastTestOutcome` written by a
+  hook-carrying sibling has `source: "harness"` with `toolUseId`, `sessionId`,
+  `outputBytes`, `outputSha256` — and **no `exitCode`**. I.4 was indeed inert.
+  Sharper still, one of those records (`Enduro`) has as its `command` a heredoc that
+  **edited the test runner to print English markers**, with a comment saying the
+  hook classifies output by English markers. The antipattern this patch forbids was
+  already happening in the corpus.
+- `nominal: true` here means an exit status decided the verdict, not that this host
+  observed it: without a hook the number is relayed by the model. `exitSource:
+  "echo"` and the provenance note say so, so the weaker link stays readable rather
+  than hiding behind a true flag.
+
 ## [0.9.0] - 2026-08-09
 
 Applies `APLICAR-POS-LOTE-COMPLETO-v0.15-a-v0.16.2-NOS-OUTROS-BUILDS.md`, Parts I
