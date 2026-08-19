@@ -9,6 +9,9 @@
 // closes the gap.
 
 import { spawn } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 export interface AlignResult {
   ok: boolean;
@@ -19,8 +22,7 @@ export interface AlignResult {
 
 function run(
   command: string,
-  args: string[],
-  stdin?: string
+  args: string[]
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
@@ -30,43 +32,24 @@ function run(
     child.stderr.on("data", (d) => (stderr += String(d)));
     child.on("error", reject);
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
-    if (stdin !== undefined) {
-      child.stdin.write(stdin);
-    }
     child.stdin.end();
   });
 }
 
-/** Inserts or replaces `PARAMETER num_ctx` in a modelfile, preserving everything else. */
-export function withNumCtx(modelfile: string, numCtx: number): string {
-  const lines = modelfile.split("\n");
-  const out: string[] = [];
-  let replaced = false;
-
-  for (const line of lines) {
-    if (/^\s*PARAMETER\s+num_ctx\s+/i.test(line)) {
-      if (!replaced) {
-        out.push(`PARAMETER num_ctx ${numCtx}`);
-        replaced = true;
-      }
-      continue; // drop duplicates
-    }
-    out.push(line);
-  }
-
-  if (replaced) return out.join("\n");
-
-  // No existing num_ctx — insert after the last PARAMETER, or after FROM.
-  const anchor = out.reduce(
-    (best, line, i) =>
-      /^\s*PARAMETER\s+/i.test(line) || /^\s*FROM\s+/i.test(line) ? i : best,
-    -1
-  );
-  if (anchor === -1) {
-    throw new Error("Modelfile has neither a FROM nor a PARAMETER line to anchor to.");
-  }
-  out.splice(anchor + 1, 0, `PARAMETER num_ctx ${numCtx}`);
-  return out.join("\n");
+/**
+ * The modelfile that pins `num_ctx` on an existing tag.
+ *
+ * It derives FROM the tag rather than patching the output of
+ * `ollama show --modelfile`, for two reasons. That output names the weight blobs
+ * by absolute path, and building from it makes Ollama re-import ~17 GB — minutes
+ * of work to change one number. And deriving inherits the tag's whole
+ * configuration, so the template, renderer, parser, license and every parameter
+ * the user set by hand are preserved by Ollama itself instead of by our
+ * line-editing. A later PARAMETER overrides an inherited one, so re-pinning a tag
+ * that already had a num_ctx replaces it.
+ */
+export function alignmentModelfile(model: string, numCtx: number): string {
+  return `FROM ${model}\nPARAMETER num_ctx ${numCtx}\n`;
 }
 
 /**
@@ -93,14 +76,19 @@ export async function alignModelContext(
     return { ok: false, model, numCtx, message: `Unexpected modelfile for ${model}.` };
   }
 
-  let patched: string;
+  // Through a file, never stdin: `ollama create -f -` stopped reading standard
+  // input (0.32.14 answers "no Modelfile or safetensors files found"), and the
+  // failure is silent from the caller's side beyond a non-zero exit.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "versus-align-"));
+  const modelfilePath = path.join(dir, "Modelfile");
+  let create: { code: number; stdout: string; stderr: string };
   try {
-    patched = withNumCtx(original, numCtx);
-  } catch (err) {
-    return { ok: false, model, numCtx, message: String(err) };
+    fs.writeFileSync(modelfilePath, alignmentModelfile(model, numCtx), "utf-8");
+    create = await run("ollama", ["create", model, "-f", modelfilePath]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 
-  const create = await run("ollama", ["create", model, "-f", "-"], patched);
   if (create.code !== 0) {
     return {
       ok: false,

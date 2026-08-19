@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.9.2] - 2026-08-19
+
+### Fixed
+
+- **"Align now" could not run at all.** It piped the modelfile to
+  `ollama create <model> -f -`, and Ollama stopped reading standard input: 0.32.14
+  answers `Error: no Modelfile or safetensors files found` and exits 1. The
+  refusal was reported honestly, so nothing was silently wrong — the command was
+  simply inert. It now writes the modelfile to a temp file and passes its path.
+
+- **Aligning no longer re-imports the weights.** The old path patched the output
+  of `ollama show --modelfile`, which names the weight blobs by absolute path;
+  building from that makes Ollama import ~17 GB to change one number, and it was
+  still running after three minutes when measured. `alignmentModelfile` now
+  derives `FROM <tag>` instead, which completes in ~0.2 s — 144 ms for the whole
+  `alignModelContext` call, measured against a throwaway tag.
+
+  Deriving also preserves more, and more reliably: the template, renderer, parser,
+  license, the second `FROM` that carries the draft model for speculative
+  decoding, and every hand-set parameter are inherited by Ollama itself rather
+  than by our line-editing. A later `PARAMETER` overrides an inherited one, so
+  re-pinning a tag that already had a `num_ctx` replaces it.
+
+- `withNumCtx` is gone with the approach it served; `alignmentModelfile` replaces
+  it, and the tests moved with it.
+
+### Notes
+
+- Verified against a probe tag built from `qwen3.8:27b` and removed afterwards —
+  the user's tag was never rewritten. The probe inherited all 8 parameters and
+  came back with `num_ctx 65536` pinned.
+- The rewrite is self-referential (`FROM <tag>` while replacing `<tag>`), which is
+  the case worth doubting. Tested explicitly on the probe: it resolves the source
+  manifest before writing the new one, and the parameters survive.
+
 ## [0.9.1] - 2026-08-09
 
 Applies `APLICAR-CLASSIFICACAO-DE-TESTE-AGNOSTICA-NOS-OUTROS-BUILDS.md`, from

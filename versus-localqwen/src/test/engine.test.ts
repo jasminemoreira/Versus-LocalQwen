@@ -7,7 +7,7 @@ import * as os from "os";
 import { StateEngine, LOOP_FAILURE_THRESHOLD } from "../state/engine";
 import { ScoreBreakdown } from "../state/types";
 import { getCompleteGuidance } from "../rules/full-guidance";
-import { withNumCtx } from "../ollama/align";
+import { alignmentModelfile } from "../ollama/align";
 import { applyPatch, inspect, PATCH_MARKER, revertPatch } from "../ollama/estimator-patch";
 import {
   advertisedBudget,
@@ -477,33 +477,22 @@ function numCtxCount(modelfile: string): number {
   return (modelfile.match(/^PARAMETER num_ctx /gm) ?? []).length;
 }
 
-test("withNumCtx appends after the last PARAMETER", () => {
-  const out = withNumCtx("FROM /blob\nTEMPLATE x\nPARAMETER temperature 1\n", 65536);
-  assert.strictEqual(numCtxCount(out), 1);
-  assert.ok(out.includes("PARAMETER temperature 1\nPARAMETER num_ctx 65536"));
-});
-
-test("withNumCtx replaces an existing value and collapses duplicates", () => {
-  const replaced = withNumCtx("FROM /blob\nPARAMETER num_ctx 4096\nPARAMETER top_k 20\n", 65536);
-  assert.strictEqual(numCtxCount(replaced), 1);
-  assert.ok(replaced.includes("num_ctx 65536"));
-  assert.ok(replaced.includes("top_k 20"), "unrelated parameters must survive");
-
-  const deduped = withNumCtx("FROM /blob\nPARAMETER num_ctx 1\nPARAMETER num_ctx 2\n", 65536);
-  assert.strictEqual(numCtxCount(deduped), 1);
-});
-
-test("withNumCtx preserves RENDERER, PARSER and LICENSE", () => {
-  const src = "# c\nFROM /b\nRENDERER qwen3.5\nPARSER qwen3.5\nPARAMETER top_p 0.95\nLICENSE \"\"\"t\"\"\"\n";
-  const out = withNumCtx(src, 65536);
-  assert.ok(out.includes("RENDERER qwen3.5"));
-  assert.ok(out.includes("PARSER qwen3.5"));
-  assert.ok(out.includes("LICENSE"));
+test("the alignment modelfile derives from the tag, so nothing is re-imported", () => {
+  const out = alignmentModelfile("qwen3.8:27b", 65536);
+  // FROM the tag, not the weight blob paths that `ollama show --modelfile`
+  // prints: building from those makes Ollama re-import ~17 GB to change one
+  // number, and it took minutes when measured.
+  assert.ok(out.includes("FROM qwen3.8:27b"));
+  assert.ok(!out.includes("/blobs/"), "a blob path here means a full re-import");
   assert.strictEqual(numCtxCount(out), 1);
 });
 
-test("withNumCtx refuses a modelfile with no anchor", () => {
-  assert.throws(() => withNumCtx("LICENSE only", 65536));
+test("re-pinning overrides the inherited value rather than duplicating it", () => {
+  // Ollama resolves a later PARAMETER over the inherited one, so the file stays
+  // two lines however many times a tag has been aligned before.
+  const out = alignmentModelfile("already-pinned:tag", 32768);
+  assert.strictEqual(numCtxCount(out), 1);
+  assert.ok(out.trim().split("\n").length === 2, "one FROM, one PARAMETER");
 });
 
 test("advertisedBudget follows the Ollama provider precedence", () => {
