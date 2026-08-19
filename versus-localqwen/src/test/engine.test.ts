@@ -1366,6 +1366,35 @@ test("a finding citing a module no version declares is drift, and blocks", () =>
   }
 });
 
+test("a dependency cell holding a module id does not hide the next module", () => {
+  const { engine: e, tmp } = atPhase2();
+  try {
+    // The shape that broke RestaUm: `depends-on` naming M-01. A global regex
+    // matched `| M-01 |` plus the newline plus the pipe OPENING the next row,
+    // consuming it, so M-03 was never seen and `game` looked absent from an
+    // architecture that plainly declared it — while board and ui resolved.
+    writeArchitectureDoc(tmp, [
+      "| id | module | responsibility | interface | depends-on |",
+      "|------|-------|----------------|-----------|------------|",
+      "| M-01 | board | state and rules | legalMoves(state) | — |",
+      "| M-02 | ui | rendering and input | render(state) | M-01 |",
+      "| M-03 | game | orchestration | initGame(el) | M-01, M-02 |",
+    ].join("\n"));
+    markAll(e, 2);
+    declareLenses(e);
+    writeCoverageMatrix(tmp, [
+      "## Iteração 1 — V(1)",
+      "",
+      "| id | module | lens | severity | description |",
+      "|----|--------|------|----------|-------------|",
+      "| P-01 | game | Security | 🟡 | the module after the one carrying a dependency |",
+    ].join("\n"));
+    assert.ok(e.advancePhase(3).ok, "M-03 is declared; the parser must see it");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
 test("a module removed between versions is tolerated, not drift", () => {
   const { engine: e, tmp } = atPhase2();
   try {

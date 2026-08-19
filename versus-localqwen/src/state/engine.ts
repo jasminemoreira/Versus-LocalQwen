@@ -549,8 +549,14 @@ export class StateEngine {
     try {
       const full = path.join(this.specsPath, relPath);
       if (!fs.existsSync(full)) return 0;
-      const text = fs.readFileSync(full, "utf-8");
-      return (text.match(new RegExp(pattern, "gm")) || []).length;
+      // Per line, for the same reason as tableColumn2: a global match can span a
+      // newline and swallow the start of the following row, under-counting rows
+      // that are plainly there.
+      const re = new RegExp(pattern);
+      return fs
+        .readFileSync(full, "utf-8")
+        .split(/\r?\n/)
+        .filter((line) => re.test(line)).length;
     } catch {
       return 0;
     }
@@ -623,10 +629,16 @@ export class StateEngine {
     try {
       const full = path.join(this.specsPath, relPath);
       if (!fs.existsSync(full)) return out;
-      const text = fs.readFileSync(full, "utf-8");
-      const re = new RegExp(`\\|\\s*(?:${idPattern})\\s*\\|\\s*([^|]+?)\\s*\\|`, "gm");
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(text)) !== null) {
+      // Line by line, anchored. A single global regex over the whole file walks
+      // across newlines: a row whose last cell is itself an id — `depends-on`
+      // holding `M-01` — matches `| M-01 |\n|` and consumes the pipe that OPENS
+      // the next row, so that row is never seen. The effect is silent and
+      // selective: the module after a dependency-carrying one disappears while
+      // its neighbours resolve, which reads as the gate being inconsistent.
+      const re = new RegExp(`^\\s*\\|\\s*(?:${idPattern})\\s*\\|\\s*([^|]+?)\\s*\\|`);
+      for (const line of fs.readFileSync(full, "utf-8").split(/\r?\n/)) {
+        const m = re.exec(line);
+        if (!m) continue;
         const v = m[1].trim().toLowerCase();
         if (v) out.add(v);
       }

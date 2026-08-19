@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.9.3] - 2026-08-19
+
+### Fixed
+
+- **The module cross-gate lost a module whenever the row above it named a
+  dependency.** `tableColumn2` ran one global regex over the whole file, and a row
+  whose last cell is itself an id — `depends-on` holding `M-01` — matched
+  `| M-01 |` plus the newline plus the pipe that OPENS the next row, consuming it.
+  That row was then never recognised, so its module vanished from the architecture
+  set while its neighbours resolved normally.
+
+  Found in the RestaUm project: an architecture declaring `board`, `ui` and `game`
+  produced `{board, ui}`, and `game` was reported as absent from every version.
+  The selectivity is what made it unfalsifiable from outside — editing the file
+  could not fix it, because the file was already correct, and the message was true
+  from the parser's point of view.
+
+  Both `tableColumn2` and `countArtifactRows` now match per line, anchored. A
+  table row cannot span lines, so nothing legitimate is lost and no match can walk
+  across a newline.
+
+### Notes
+
+- Verified against the real project: the architecture now renders
+  `{board, ui, game}` and the gate reports no drift.
+- The bug came in with the v0.13.0 cross-gate, whose spec supplied this regex
+  verbatim — so the same shape is likely present in the sibling builds. Worth a
+  patch note to the batch: any project whose `depends-on` column names module ids
+  can lose the module declared on the following row.
+
 ## [0.9.2] - 2026-08-19
 
 ### Fixed
