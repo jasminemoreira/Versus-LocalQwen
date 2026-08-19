@@ -6,7 +6,12 @@ import * as path from "path";
 import * as os from "os";
 import { StateEngine, LOOP_FAILURE_THRESHOLD } from "../state/engine";
 import { ScoreBreakdown } from "../state/types";
-import { getCompleteGuidance, getFullGuidance, splitGuidance } from "../rules/full-guidance";
+import {
+  EMISSION_BUDGET_TOKENS,
+  getCompleteGuidance,
+  getFullGuidance,
+  splitGuidance,
+} from "../rules/full-guidance";
 import { alignmentModelfile } from "../ollama/align";
 import { applyPatch, inspect, PATCH_MARKER, revertPatch } from "../ollama/estimator-patch";
 import {
@@ -2091,6 +2096,27 @@ test("the guidance makes the echo the standard invocation", () => {
 
 
 console.log("\n=== Guidance Delivery Tests ===\n");
+
+test("the emission budget is a global rule, and it arrives first", () => {
+  // The host aborts one request at 60 s mid-stream; at ~37 t/s that is ~2000
+  // tokens. A rule the model never reads cannot prevent that, so it must be in
+  // the part that always arrives inline.
+  for (const phase of [0, 1, 2, 3, 4, 5, 6, 7]) {
+    const parts = splitGuidance(getFullGuidance(phase));
+    assert.ok(parts[0].includes("R6: Emission budget"), `phase ${phase} carries R6 in part 1`);
+  }
+  const g = getFullGuidance(2);
+  assert.ok(g.includes(String(EMISSION_BUDGET_TOKENS)), "the budget is stated as a number");
+  assert.ok(g.includes("PER REQUEST"), "the reason the split is cheap must be stated");
+});
+
+test("R6 does not weaken R5 — complete, in blocks", () => {
+  const g = getFullGuidance(2);
+  assert.ok(/complete table is still mandatory/.test(g));
+  assert.ok(/never summarized, never truncated/.test(g));
+  // And the phase that actually crosses the budget says so where it happens.
+  assert.ok(g.includes("findings 1-30 of 47"), "Phase 2 shows how to announce a split");
+});
 
 test("the parts reassemble into exactly the whole guidance", () => {
   // The invariant that matters: splitting is a delivery change, not an edit.

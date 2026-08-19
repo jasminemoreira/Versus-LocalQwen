@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.10.1] - 2026-08-19
+
+### Added
+
+- **R6, an emission budget: ~1200 tokens per tool call or message.** The chat host
+  aborts any single request at 60 seconds of wall clock, and it does so
+  mid-stream — two measured failures returned at 59.947 s and 59.998 s with the
+  model still generating, against 48 requests in the same window that finished
+  under 10 s. At the ~37 tokens/s this build sustains, minus ~6 s prefilling the
+  new context, the hard ceiling is about 2000 output tokens. A turn that crosses it
+  dies as "Sorry, no response was returned", and retrying reproduces it exactly,
+  because the size is the cause.
+
+  The rule states the one fact that makes the fix cheap: **the deadline is per
+  REQUEST, not per turn.** An agent turn is many requests and each restarts the
+  clock, so splitting an emission costs nothing but a split. Long artifacts are
+  appended across calls (~30 findings rows each); long tables are displayed in
+  blocks with the range announced.
+
+  R6 is always active, so it lands in part 1 of every phase — the part that always
+  arrives inline. A rule the model never reads cannot prevent anything.
+
+- Phase 2 says it where it happens: twelve lenses over every module passes 40
+  findings easily, and 40 rows in one emission is over the cap.
+
+### Notes
+
+- **R6 does not weaken R5.** The complete table is still mandatory — complete in
+  blocks, never summarized, never truncated, never "the rest is in the file". A
+  test asserts both halves, because a budget read as permission to abbreviate would
+  cost more than the timeout does.
+- **Not a methodology change, and not a cross-build patch.** The ceiling is a
+  function of tokens/s, a property of this runtime: a hosted model emits 2000
+  tokens in seconds and never meets the deadline. This is the same kind of
+  local-model adaptation as everything under `src/ollama/`. Earlier in this session
+  I framed it as needing a four-build patch; that reading was wrong.
+- Nothing else was available: there is no timeout setting (the only `chat.*`
+  timeouts are terminal-tool ones), speculative decoding is already on (MTP,
+  `--spec-type draft-mtp`), and the window cannot grow — 1.8 GB of VRAM headroom.
+
 ## [0.10.0] - 2026-08-19
 
 Minor bump: `get_phase_guidance` gained a parameter and now answers in parts.

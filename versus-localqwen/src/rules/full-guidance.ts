@@ -18,6 +18,20 @@ export interface PhaseGuidance {
 }
 
 // Global rules injected according to phase
+/**
+ * How much a single request may produce, in tokens.
+ *
+ * The chat host aborts a request at 60 seconds of wall clock, mid-stream: two
+ * measured failures came back at 59.947 s and 59.998 s with the model still
+ * generating, while 48 requests in the same window succeeded in under 10 s. At the
+ * ~37 tokens/s this build sustains, and ~6 s spent prefilling the new context, the
+ * hard ceiling is around 2000 tokens. This budget leaves margin for a slower turn.
+ *
+ * It is a property of THIS runtime, not of the methodology: a hosted model emits
+ * 2000 tokens in seconds and never meets the deadline.
+ */
+export const EMISSION_BUDGET_TOKENS = 1200;
+
 const GLOBAL_RULES = {
   R1: "R1: Evaluate triggers before coding. If triggered → Phase 0. Never skip to implementation.",
   R2: `R2: Every user decision asked directly in chat. MANDATORY FORMAT — follow this template exactly:
@@ -52,6 +66,17 @@ Per phase:
 - **P7:** Product evaluation. Project lessons (domain, stack, patterns, wrong assumptions). Meta-iteration offer.
 
 Rule: If you computed it, SHOW it. The user cannot validate what they cannot see.`,
+  R6: `R6: Emission budget — never produce more than ~${EMISSION_BUDGET_TOKENS} tokens (~${EMISSION_BUDGET_TOKENS * 4} characters) in ONE tool call or ONE message.
+
+This host aborts any single request at 60 seconds, while tokens are still streaming — it is a wall-clock cap on the request, not an idle timeout. On a local model at ~37 tokens/s, minus the prefill of new context, that is about 2000 tokens of output. Cross it and the turn dies with "Sorry, no response was returned", and retrying reproduces it exactly, because the size is the cause.
+
+The deadline is PER REQUEST, not per turn: an agent turn is many requests, and each one restarts the clock. So this costs nothing but a split.
+
+- **Writing a long artifact:** append it in successive tool calls instead of one large write. A findings row costs ~30-40 tokens, so about 30 rows per call.
+- **Displaying a long table:** show it in blocks across messages — by module, by lens, by section.
+- R5 is unchanged: the complete table is still mandatory. Complete, in blocks — never summarized, never truncated, never "the rest is in the file".
+
+Announce the split ("matrix, findings 1-30 of 47") so the user can see nothing was dropped.`,
 };
 
 // [G9] Property 1 — Generative Invariance + [G12] Adoption criterion
@@ -448,6 +473,7 @@ Each non-activated lens still needs its own individual justification — the tex
 **GENERATION MODE:** Phase 2 operates in generative mode — produce failure scenarios, not quality judgments. "How does this module fail?" generates new content (no confirmation bias anchor). "Is this design good?" asks the AI to evaluate what it produced (confirmation bias activated). The lens central questions are already in generative mode — follow them as written.
 
 ### Coverage Matrix (mandatory) (⚠️ MUST DISPLAY complete table in chat — do NOT summarize or skip modules/lenses):
+This is the phase that most often crosses R6's budget: twelve lenses over every module easily passes 40 findings, and 40 rows in one emission is over the host's 60-second cap. Split it — persist in appended calls, display in blocks, announce the range of each ("findings 1-30 of 47"). Complete in blocks is what R5 asks for; one oversized emission produces no table at all.
 One row per finding: id | module | lens | severity | description. Every module × lens pair (universal + activated conditional) must be accounted for — a pair that produced nothing is a valid result, recorded as such rather than left out.
 
 ### Concentration analysis (MANDATORY after the matrix) (⚠️ MUST DISPLAY analysis in chat):
@@ -950,6 +976,7 @@ export function getFullGuidance(phase: number): string {
   parts.push("## ACTIVE GLOBAL RULES");
   parts.push(GLOBAL_RULES.R2); // R2 always active
   parts.push(GLOBAL_RULES.R5); // R5 always active — mandatory display
+  parts.push(GLOBAL_RULES.R6); // R6 always active — one request cannot outrun the host's deadline
 
   if (phase < 5) {
     parts.push(GLOBAL_RULES.R1);
