@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.10.0] - 2026-08-19
+
+Minor bump: `get_phase_guidance` gained a parameter and now answers in parts.
+
+### Fixed
+
+- **The phase guidance never reached the model on this host.** The chat host keeps
+  a tool result inline only up to a limit it does not publish; measured on this
+  build, 5691 chars arrived inline and 8377 was written out to
+  `chat-session-resources/.../content.json` instead. Every phase's guidance is
+  larger than that — the smallest is 8.1 KB, Phase 2 is 21 KB — so **all 11
+  guidance calls in the RestaUm session were externalized, and no other tool ever
+  was**. The model only got the rules if it noticed the file and went to fetch it;
+  it was last seen trying to print the file back into the conversation in 1500-char
+  chunks with python, which would have produced another oversized result and
+  spilled again.
+
+  `get_phase_guidance(phase, part)` now delivers the phase in order, in parts of
+  at most 4 KB. Measured through the bundled server, the largest result is now
+  4688 bytes — inside the confirmed-inline range, with 3689 bytes of margin.
+
+### Changed
+
+- Parts break on markdown headings and bold sub-block openers, never on a byte
+  count, so a part never begins mid-sentence and a table keeps its header row. In
+  Phase 2 the conditional-lens table splits exactly at the Domain Transfer Lenses
+  block, which has a header of its own.
+- Reading order is preserved exactly. Front-loading the exit gate was considered
+  and rejected: it would change what the model does, not just when it reads it.
+- Every part but the last carries `_nextAction` demanding the next call — the same
+  mechanism `advance_phase` uses to chain.
+
+### Notes
+
+- The trade is stated rather than hidden: a phase can now be read halfway, which
+  the monolithic shape made impossible. That replaces a worse failure — a phase
+  whose rules never arrived at all, silently. The `_nextAction` chain is what
+  closes it, and a test asserts the chain is unbroken on every part but the last.
+- The invariant under test is that splitting is a delivery change, not an edit:
+  the parts of every phase rejoin to exactly the original text.
+- Cost: 34 calls to read all eight phases instead of 8. Each extra round trip is
+  ~1 s of cached prefill (measured: 1646 tokens in 866 ms); the total guidance
+  tokens in context are unchanged.
+- **This diverges from the sibling builds on purpose.** Claude, Qwen and Kimi run
+  on hosts with different limits and do not show the symptom. Nothing in IACDM says
+  the guidance must arrive in one tool result — this is interface, not
+  methodology — so no cross-build patch is warranted.
+- The 4 KB budget also leaves room for the ~4.4 KB of global rules repeated in
+  every phase's payload. Serving those once and referencing them later would save
+  ~35 KB across a cycle, but was deliberately NOT done here: if a compaction drops
+  the preamble it never comes back, and that would lose something real.
+
 ## [0.9.3] - 2026-08-19
 
 ### Fixed

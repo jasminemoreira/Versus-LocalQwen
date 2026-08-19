@@ -1019,3 +1019,44 @@ export function getCompleteGuidance(): string {
 
   return parts.join("\n");
 }
+
+/**
+ * The size a single guidance part aims for, in characters.
+ *
+ * The chat host on this build keeps a tool result inline only up to a limit it
+ * does not publish; measured, 5691 chars arrived inline and 8377 was written out
+ * to a session-resource file instead. A result that lands on disk never reaches
+ * the model directly — it has to notice and go fetch it — so every phase's
+ * guidance, the smallest of which is 8.1 KB, was being externalized. 4 KB keeps
+ * a part inside the measured-safe range with room for the JSON envelope.
+ */
+export const GUIDANCE_PART_CHARS = 4096;
+
+/**
+ * Splits guidance into parts on structural boundaries, packing greedily.
+ *
+ * Boundaries are markdown headings and bold sub-block openers, so a part never
+ * begins mid-sentence and a table never loses its header row. Order is preserved
+ * exactly: the phases read as narratives ("Step 0", "Step 1", …), and reordering
+ * them to front-load the gate would change what the model does, not just when it
+ * reads it.
+ *
+ * A block larger than the budget is emitted whole rather than cut — a split
+ * inside a table is worse than one oversized part.
+ */
+export function splitGuidance(text: string, budget = GUIDANCE_PART_CHARS): string[] {
+  const blocks = text.split(/\n(?=#{2,4} |\*\*[A-Z])/);
+  const parts: string[] = [];
+  let current = "";
+
+  for (const block of blocks) {
+    if (current && current.length + block.length + 1 > budget) {
+      parts.push(current);
+      current = block;
+    } else {
+      current = current ? `${current}\n${block}` : block;
+    }
+  }
+  if (current) parts.push(current);
+  return parts.length > 0 ? parts : [text];
+}

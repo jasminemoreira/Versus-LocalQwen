@@ -6,7 +6,7 @@ import * as path from "path";
 import * as os from "os";
 import { StateEngine, LOOP_FAILURE_THRESHOLD } from "../state/engine";
 import { ScoreBreakdown } from "../state/types";
-import { getCompleteGuidance } from "../rules/full-guidance";
+import { getCompleteGuidance, getFullGuidance, splitGuidance } from "../rules/full-guidance";
 import { alignmentModelfile } from "../ollama/align";
 import { applyPatch, inspect, PATCH_MARKER, revertPatch } from "../ollama/estimator-patch";
 import {
@@ -563,8 +563,15 @@ test("phase 0 guidance is readable before init_project", () => {
     // requiring an initialized project to read it would be circular.
     const ok = JSON.parse(handleGetPhaseGuidance(engine, { phase: 0 }));
     assert.strictEqual(ok.initialized, false);
-    assert.ok(ok.guidance.includes("BOOTSTRAP PROTOCOL"));
-    assert.ok(ok.guidance.includes("SURFACE files only"));
+    assert.strictEqual(ok.part, 1);
+
+    // The bootstrap protocol is somewhere in the parts, not necessarily the first.
+    let whole = "";
+    for (let p = 1; p <= ok.totalParts; p++) {
+      whole += JSON.parse(handleGetPhaseGuidance(engine, { phase: 0, part: p })).guidance;
+    }
+    assert.ok(whole.includes("BOOTSTRAP PROTOCOL"));
+    assert.ok(whole.includes("SURFACE files only"));
 
     // Later phases stay gated — there is no state for them to describe.
     const denied = JSON.parse(handleGetPhaseGuidance(engine, { phase: 3 }));
@@ -2080,6 +2087,71 @@ test("the guidance makes the echo the standard invocation", () => {
   const g = getCompleteGuidance();
   assert.ok(g.includes('npm test; echo "VERSUS_TEST_EXIT=$?"'));
   assert.ok(g.includes("Never modify the test runner"), "the antipattern must be named");
+});
+
+
+console.log("\n=== Guidance Delivery Tests ===\n");
+
+test("the parts reassemble into exactly the whole guidance", () => {
+  // The invariant that matters: splitting is a delivery change, not an edit.
+  // Nothing may be dropped, duplicated, or reordered on the way out.
+  for (const phase of [0, 1, 2, 3, 4, 5, 6, 7]) {
+    const whole = getFullGuidance(phase);
+    assert.strictEqual(splitGuidance(whole).join("\n"), whole, `phase ${phase} round-trips`);
+  }
+});
+
+test("every part fits inside the host's inline limit", () => {
+  // Measured on this host: 5691 chars arrived inline, 8377 was written to a
+  // session-resource file instead. A part above that never reaches the model.
+  const MEASURED_INLINE_OK = 5691;
+  for (const phase of [0, 1, 2, 3, 4, 5, 6, 7]) {
+    for (const part of splitGuidance(getFullGuidance(phase))) {
+      assert.ok(
+        part.length <= MEASURED_INLINE_OK,
+        `phase ${phase} has a ${part.length}-char part; it would be externalized`
+      );
+    }
+  }
+});
+
+test("a part never begins mid-sentence", () => {
+  // Parts break on headings and bold openers, so a table keeps its header row
+  // and no part opens halfway through a paragraph.
+  for (const phase of [0, 1, 2, 3, 4, 5, 6, 7]) {
+    for (const part of splitGuidance(getFullGuidance(phase))) {
+      assert.ok(/^(#{1,4} |\*\*)/.test(part), `phase ${phase}: part starts with "${part.slice(0, 40)}"`);
+    }
+  }
+});
+
+test("every part but the last demands the next one", () => {
+  const { engine: e, tmp } = engineAt(2);
+  try {
+    const first = JSON.parse(handleGetPhaseGuidance(e, { phase: 2 }));
+    assert.strictEqual(first.part, 1, "an omitted part means the first");
+    assert.ok(first.totalParts > 1);
+
+    for (let p = 1; p < first.totalParts; p++) {
+      const r = JSON.parse(handleGetPhaseGuidance(e, { phase: 2, part: p }));
+      assert.ok(r._nextAction.includes(`part=${p + 1}`), `part ${p} must chain to ${p + 1}`);
+    }
+    const last = JSON.parse(handleGetPhaseGuidance(e, { phase: 2, part: first.totalParts }));
+    assert.strictEqual(last._nextAction, undefined, "the last part is the end of the chain");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a part out of range says what the range is", () => {
+  const { engine: e, tmp } = engineAt(2);
+  try {
+    const r = JSON.parse(handleGetPhaseGuidance(e, { phase: 2, part: 99 }));
+    assert.ok(r.error.includes("does not exist"));
+    assert.ok(r.error.includes(`1..${r.totalParts}`), "a refusal must name the valid range");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
 });
 
 console.log("\n=== All tests completed ===\n");

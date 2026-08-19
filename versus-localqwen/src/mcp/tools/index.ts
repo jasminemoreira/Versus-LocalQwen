@@ -121,6 +121,7 @@ function sanitize(args: Record<string, unknown>): Record<string, unknown> {
   if ("failed" in out) out.failed = toBoolean(out.failed);
   if ("conditional" in out) out.conditional = toStringArray(out.conditional);
   if ("exit_code" in out) out.exit_code = toNumber(out.exit_code);
+  if ("part" in out) out.part = toNumber(out.part);
   return out;
 }
 
@@ -170,7 +171,7 @@ async function dispatch(
     case "init_project":
       return handleInitProject(engine, args as { name: string; description: string; bootstrap_data?: Record<string, unknown> });
     case "get_phase_guidance":
-      return handleGetPhaseGuidance(engine, args as { phase?: number });
+      return handleGetPhaseGuidance(engine, args as { phase?: number; part?: number });
     case "update_project_spec":
       return handleUpdateProjectSpec(engine, args as { stack?: string[]; outOfScope?: string[]; patterns?: string[]; constraints?: string[] });
     case "start_new_cycle":
