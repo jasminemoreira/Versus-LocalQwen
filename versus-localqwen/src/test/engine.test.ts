@@ -2097,6 +2097,53 @@ test("the guidance makes the echo the standard invocation", () => {
 
 console.log("\n=== Guidance Delivery Tests ===\n");
 
+test("get_phase_state reports safeguards LIVE, not the cached status", () => {
+  const { engine: e, tmp } = engineInPhase5();
+  try {
+    for (let i = 0; i < LOOP_FAILURE_THRESHOLD; i++) e.recordTestOutcome("npm test", "fail");
+
+    // The stored field is only written by check_all_safeguards, which nothing
+    // here called — so it still says the safeguard is fine.
+    const cached = e.getPhaseState()!.safeguards.find((s) => s.id === "S6")!;
+    assert.strictEqual(cached.status, "ok", "the cached field is stale by design");
+
+    // And S6 is in fact vetoing the next transition right now.
+    assert.ok(!e.advancePhase(6).ok, "S6 is blocking");
+
+    const out = JSON.parse(handleGetPhaseState(e));
+    const s6 = out.safeguards.find((x: { id: string }) => x.id === "S6");
+    assert.strictEqual(s6.status, "violated", "what is reported must be what is enforced");
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
+test("a named diagnosis clears the violation in the panel too", () => {
+  const { engine: e, tmp } = engineInPhase5();
+  try {
+    for (let i = 0; i < LOOP_FAILURE_THRESHOLD; i++) e.recordTestOutcome("npm test", "fail");
+    const before = JSON.parse(handleGetPhaseState(e));
+    assert.strictEqual(before.safeguards.find((x: { id: string }) => x.id === "S6").status, "violated");
+
+    e.recordDecision(5, "diagnosis", "the fixture rebuilt state between runs");
+
+    // Back to `warning`, not `ok`: in Phase 5 S6 always carries the standing
+    // "implementation active" advisory. What matters is that it stops being a
+    // violation the moment the escape is taken — with nobody recording anything.
+    const after = JSON.parse(handleGetPhaseState(e));
+    assert.strictEqual(after.safeguards.find((x: { id: string }) => x.id === "S6").status, "warning");
+
+    // And the veto really is lifted: what blocks now is the unmet criteria, not S6.
+    const blocked = e.advancePhase(6);
+    assert.ok(!blocked.ok);
+    if (!blocked.ok) {
+      assert.deepStrictEqual(blocked.error.safeguardViolations, [], "S6 no longer vetoes");
+    }
+  } finally {
+    cleanTempWorkspace(tmp);
+  }
+});
+
 test("the emission budget is a global rule, and it arrives first", () => {
   // The host aborts one request at 60 s mid-stream; at ~37 t/s that is ~2000
   // tokens. A rule the model never reads cannot prevent that, so it must be in

@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.10.2] - 2026-08-19
+
+Standalone patch "painel de safeguards ao vivo", from Versus for Claude 0.16.5.
+Display only — no gate and no engine behaviour changed.
+
+### Fixed
+
+- **The safeguard panel showed a frozen portrait.** `state.safeguards[].status`
+  starts at `ok` and is only written when something calls `checkSafeguard`;
+  `advance_phase` validates the safeguards to decide a veto but never records the
+  outcome. So the sidebar and `get_phase_state` could report all-green about a
+  safeguard that was vetoing the next transition at that very moment. Both now
+  derive the status on read, via `validateSafeguard`.
+
+  Measured here, on a project sitting in Phase 4 that advanced without a Phase 0
+  score of 90: the stored field says `S0=ok`, and the live check says
+  `S0=violated`. Enforcement was always real; only the display lagged.
+
+### Notes
+
+- The staleness in this build is narrower than the patch describes, and worth
+  recording accurately: `record_test_outcome` already routes through
+  `engine.checkSafeguard("S6")`, which writes the field as a side effect. So S6
+  specifically was usually fresh when the model reported a test through the tool —
+  verified end to end. What stayed stale is everything else (S0, S1, S5, S7) and
+  S6 on any path that does not go through that tool.
+- By design only S0 and S6 ever reach `violated`; S1/S5/S7 are warnings and
+  S2/S3/S4 are behavioural and always `ok`. A mostly green panel is legitimate —
+  the fix is that the two that can turn red now do so when they are red.
+- In Phase 5 a cleared S6 reads `warning`, not `ok`: it carries the standing
+  "implementation active" advisory. The test asserts the transition out of
+  `violated` and that the veto is gone, rather than a state S6 never has there.
+
 ## [0.10.1] - 2026-08-19
 
 ### Added

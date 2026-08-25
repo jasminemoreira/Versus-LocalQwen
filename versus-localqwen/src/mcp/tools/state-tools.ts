@@ -2,6 +2,7 @@
 
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { StateEngine } from "../../state/engine";
+import { validateSafeguard } from "../../rules/safeguards";
 
 export const getPhaseStateTool: Tool = {
   name: "get_phase_state",
@@ -99,7 +100,10 @@ export function handleGetPhaseState(engine: StateEngine): string {
     phase0Score: state.phase0Score,
     decisionsCount: state.decisions.length,
     recentDecisions,
-    safeguards: state.safeguards.map((s) => ({ id: s.id, status: s.status })),
+    // Live, for the same reason the sidebar is: the stored status is only written
+    // by check_all_safeguards, so a model reading it would be told "ok" about a
+    // safeguard that is currently vetoing its next transition.
+    safeguards: state.safeguards.map((s) => ({ id: s.id, status: validateSafeguard(s.id, state).status })),
     // What the tests_passing gate will read. Without it the model had to open
     // state.json by hand to find out why the gate refused.
     lastTestOutcome: state.lastTestOutcome ?? null,

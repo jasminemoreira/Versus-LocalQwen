@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { PhaseState } from "../state/types";
 import { getPhaseDefinition, getExitCriteriaForPhase } from "../rules/phases";
+import { validateSafeguard } from "../rules/safeguards";
 
 export class SidebarProvider implements vscode.TreeDataProvider<StateItem> {
   private _onDidChangeTreeData = new vscode.EventEmitter<StateItem | undefined | null>();
@@ -154,14 +155,22 @@ export class SidebarProvider implements vscode.TreeDataProvider<StateItem> {
     );
     items.push(decisionsItem);
 
-    const violated = this.state.safeguards.filter((s) => s.status === "violated");
-    const warnings = this.state.safeguards.filter((s) => s.status === "warning");
+    // Derived on read, not read from state.safeguards[].status. That field starts
+    // at "ok" and is only written when the agent calls check_all_safeguards —
+    // which the guidance triggers once, in Phase 4. advance_phase validates the
+    // safeguards to decide a block but never records the outcome, and neither
+    // does the loop detector, so the panel was a frozen portrait: S6 could be
+    // blocking transitions with every light still green. Enforcement was real;
+    // only the display lagged.
+    const sgLive = this.state.safeguards.map((s) => validateSafeguard(s.id, this.state!));
+    const violated = sgLive.filter((s) => s.status === "violated");
+    const warnings = sgLive.filter((s) => s.status === "warning");
     const sgIcon = violated.length > 0 ? "error" : warnings.length > 0 ? "warning" : "pass";
     const sgItem = new StateItem(
       `Safeguards`,
       `${violated.length} violated, ${warnings.length} warnings`,
       sgIcon,
-      this.state.safeguards.map(
+      sgLive.map(
         (s) => new StateItem(
           `${s.id}: ${s.status}`,
           s.details || "",
