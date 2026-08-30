@@ -2,7 +2,7 @@
   "name": "versus-localqwen",
   "displayName": "Versus for Local Qwen",
   "description": "IACDM orchestrator for local models served by Ollama in VS Code Agent Mode. Adds a context-budget guard for architectures without KV cache shifting, where overflow kills generation silently.",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "publisher": "JasmineMoreira",
   "author": "Jasmine Moreira",
   "license": "MIT",
@@ -87,6 +87,12 @@
     "configuration": {
       "title": "Versus for Local Qwen",
       "properties": {
+        "versus-localqwen.kvCacheType": {
+          "type": "string",
+          "enum": ["f16", "q8_0", "q4_0"],
+          "default": "f16",
+          "description": "The OLLAMA_KV_CACHE_TYPE the Ollama SERVER runs with. Only used to size the context window suggestion: a quantised cache halves (q8_0) or quarters (q4_0) what a token of context costs in VRAM. The default assumes f16, which overestimates the cost and therefore suggests a smaller window — the safe direction. Set it to match your server to get the window you can actually afford."
+        },
         "versus-localqwen.ollamaUrl": {
           "type": "string",
           "default": "http://127.0.0.1:11434",

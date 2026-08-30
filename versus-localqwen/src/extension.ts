@@ -9,9 +9,10 @@ import { ContextStatus } from "./views/context-status";
 import { reportSiblings } from "./views/sibling-check";
 import { ensureEstimatorClamp } from "./views/estimator-patch-ui";
 import { ensureSpecsReadme, AGENT_INSTRUCTIONS_CONTENT } from "./setup";
-import { advertisedBudget, effectiveWindow } from "./ollama/client";
+import { advertisedBudget, effectiveWindow, modelInfo } from "./ollama/client";
 import { alignModelContext } from "./ollama/align";
 import { promptForNumCtx } from "./ollama/align-ui";
+import { DEFAULT_HEADROOM_MIB, Fit, fitWindow, kvMiBPerToken, readGpuMemory } from "./ollama/vram";
 import { effectiveBudget, hasDrifted } from "./ollama/estimator-drift";
 import { resetEstimator } from "./ollama/reset-estimator";
 import {
@@ -34,6 +35,48 @@ const SPECS_SUBDIRS = [
 let sidebarProvider: SidebarProvider | undefined;
 let contextStatus: ContextStatus | undefined;
 let outputChannel: vscode.OutputChannel;
+
+
+/**
+ * The window that fits this GPU, or null when it cannot be computed honestly.
+ *
+ * Needs three readings and refuses without all of them: free VRAM (nvidia-smi),
+ * the window the model is loaded with (the anchor — a projection with no
+ * measured starting point is a guess), and the model's attention shape from
+ * /api/show, which is what makes the KV cost per token derivable rather than
+ * assumed.
+ */
+async function suggestWindow(
+  model: string,
+  win: { loadedWindow: number | null; architecturalMax: number | null }
+): Promise<Fit | null> {
+  try {
+    if (!win.loadedWindow) return null;
+    const gpu = await readGpuMemory();
+    if (!gpu) return null;
+
+    const cfg = vscode.workspace.getConfiguration("versus-localqwen");
+    const url = cfg.get<string>("ollamaUrl", "http://127.0.0.1:11434").replace(/\/+$/, "");
+    // The server's env, not ours: the extension host does not inherit
+    // OLLAMA_KV_CACHE_TYPE from the systemd unit that sets it. Assuming f16
+    // overestimates the cost and so errs towards a smaller window.
+    const cacheType = cfg.get<string>("kvCacheType", "f16");
+    const perToken = kvMiBPerToken(await modelInfo(url, model), cacheType);
+    if (perToken === null) return null;
+
+    return fitWindow({
+      totalMiB: gpu.totalMiB,
+      freeMiB: gpu.freeMiB,
+      anchorWindow: win.loadedWindow,
+      kvMiBPerToken: perToken,
+      headroomMiB: DEFAULT_HEADROOM_MIB,
+      maxWindow: win.architecturalMax ?? undefined,
+      cacheType,
+    });
+  } catch {
+    return null; // a suggestion is a convenience; never let it break the command
+  }
+}
 
 function log(msg: string) {
   outputChannel?.appendLine(`[Versus] ${new Date().toISOString()} ${msg}`);
@@ -260,7 +303,14 @@ export function activate(context: vscode.ExtensionContext) {
           (await vscode.window.showInputBox({ prompt: "Model tag to align", placeHolder: "qwen3.6:27b" }));
         if (!model) return;
 
-        const numCtx = await promptForNumCtx(effectiveWindow(r.window ?? { loadedWindow: null, pinnedNumCtx: null, architecturalMax: null }));
+        const win = r.window ?? { loadedWindow: null, pinnedNumCtx: null, architecturalMax: null };
+        const fit = await suggestWindow(model, win);
+        if (fit) {
+          log(`alignContext: suggesting ${fit.numCtx} — ${fit.explanation}`);
+        } else {
+          log("alignContext: no suggestion (GPU or model figures unavailable, or the model is not loaded)");
+        }
+        const numCtx = await promptForNumCtx(effectiveWindow(win), fit);
         if (numCtx === undefined) return;
 
         const confirmed = await vscode.window.showWarningMessage(

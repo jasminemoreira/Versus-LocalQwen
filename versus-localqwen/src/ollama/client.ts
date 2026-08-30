@@ -79,6 +79,15 @@ function architecturalContextLength(modelInfo: Record<string, unknown> | undefin
   return null;
 }
 
+/** The model's attention shape, for deriving what a token of KV cache costs. */
+export async function modelInfo(
+  baseUrl: string,
+  model: string
+): Promise<Record<string, unknown> | undefined> {
+  const show = await getJson(`${baseUrl}/api/show`, { model });
+  return show?.model_info as Record<string, unknown> | undefined;
+}
+
 export async function describeWindow(baseUrl: string, model: string): Promise<ModelWindow> {
   const show = await getJson(`${baseUrl}/api/show`, { model });
   const running = await listRunning(baseUrl).catch(() => [] as RunningModel[]);

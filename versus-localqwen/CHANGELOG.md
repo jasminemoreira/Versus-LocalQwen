@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.11.0] - 2026-08-30
+
+Minor bump: a new setting, and `Align now` stops proposing one machine's number
+to every machine.
+
+### Added
+
+- **The context window suggestion is computed from the GPU, not asserted.**
+  `Align now` used to default to 65536 — the window this developer's card
+  sustains. On a 24 GB card that leaves ~1.8 GB for the desktop, and a heavier
+  desktop pushes the KV cache into system RAM, where generation falls 20-50x and
+  the session reads as frozen with no error anywhere. Pinning `num_ctx` is what
+  puts a user on that edge: without the pin Ollama picks a smaller window itself.
+
+  `src/ollama/vram.ts` derives the KV cost per token from what `/api/show`
+  publishes and picks the largest window on a familiar ladder that still leaves a
+  margin free. The dialog shows the arithmetic, so the number can be checked
+  rather than trusted.
+
+- **`versus-localqwen.kvCacheType`** (`f16` | `q8_0` | `q4_0`), used only for that
+  sizing. The extension host does not inherit `OLLAMA_KV_CACHE_TYPE` from the
+  systemd unit that sets it on the server, so it has to be told. The default
+  assumes `f16`, which overestimates the cost and therefore suggests a SMALLER
+  window — wrong in the safe direction.
+
+### Notes
+
+- **Only full-attention layers pay for the cache.** qwen35 declares
+  `full_attention_interval: 4` over 64 blocks, so 16 layers hold a KV cache and
+  the window is four times cheaper than the textbook formula predicts. Missing
+  this would make every suggestion far too small; a test pins the divisor.
+- **Validated against the measurement, not against itself.** The formula gives
+  2171 MiB of KV at 65536 tokens where llama.cpp reports 2176 — 0.2% out. And fed
+  the real 4090 figures captured on 19/08 (24564 MiB total, 1846 MiB free at
+  65536), it answers 49152: the window that card could actually hold. That card
+  was replaced on 20/08 by a 32 GB one, so this is now the only way to reason
+  about the hardware the extension is meant to support.
+- **It refuses rather than guesses.** No suggestion without free VRAM from
+  nvidia-smi, a loaded model to anchor on, and the attention shape from
+  `/api/show`. A projection with no measured starting point is a guess, and the
+  dialog falls back to its previous default.
+- The anchor is only valid for the cache type currently loaded: changing
+  `OLLAMA_KV_CACHE_TYPE` invalidates the free reading it was taken under, so the
+  code does not project across cache types.
+- What it does NOT do, deliberately: reimplement Ollama's own open `--fit-vram`
+  request (ollama#12353) by loading and reloading to search for a fit. One
+  measured anchor plus a derived slope is enough, and costs nothing.
+
 ## [0.10.2] - 2026-08-19
 
 Standalone patch "painel de safeguards ao vivo", from Versus for Claude 0.16.5.

@@ -13,6 +13,7 @@ import {
   splitGuidance,
 } from "../rules/full-guidance";
 import { alignmentModelfile } from "../ollama/align";
+import { DEFAULT_HEADROOM_MIB, fitWindow, kvMiBPerToken } from "../ollama/vram";
 import { applyPatch, inspect, PATCH_MARKER, revertPatch } from "../ollama/estimator-patch";
 import {
   advertisedBudget,
@@ -2225,6 +2226,88 @@ test("a part out of range says what the range is", () => {
   } finally {
     cleanTempWorkspace(tmp);
   }
+});
+
+
+console.log("\n=== VRAM Sizing Tests ===\n");
+
+/** qwen3.8:27b, as /api/show publishes it. */
+const QWEN_INFO = {
+  "qwen35.block_count": 64,
+  "qwen35.attention.head_count_kv": 4,
+  "qwen35.attention.key_length": 256,
+  "qwen35.full_attention_interval": 4,
+};
+
+test("the KV cost per token matches what llama.cpp reports", () => {
+  // Measured on this model at 65536 tokens with q8_0: 2176 MiB.
+  const per = kvMiBPerToken(QWEN_INFO, "q8_0")!;
+  const at64k = per * 65536;
+  assert.ok(Math.abs(at64k - 2176) < 20, `formula says ${at64k.toFixed(0)} MiB, llama.cpp says 2176`);
+});
+
+test("only the full-attention layers pay for the cache", () => {
+  // 64 blocks at interval 4 means 16 layers hold a KV cache, so the window is
+  // four times cheaper here than the usual formula predicts. Missing this would
+  // make every suggestion far too small.
+  const hybrid = kvMiBPerToken(QWEN_INFO, "q8_0")!;
+  const uniform = kvMiBPerToken({ ...QWEN_INFO, "qwen35.full_attention_interval": 1 }, "q8_0")!;
+  assert.ok(Math.abs(uniform / hybrid - 4) < 0.01, "the interval must divide the layer count");
+});
+
+test("the cache type scales the cost", () => {
+  const q8 = kvMiBPerToken(QWEN_INFO, "q8_0")!;
+  assert.ok(Math.abs(kvMiBPerToken(QWEN_INFO, "q4_0")! / q8 - 0.5) < 0.01);
+  assert.ok(Math.abs(kvMiBPerToken(QWEN_INFO, "f16")! / q8 - 2) < 0.01);
+  assert.strictEqual(kvMiBPerToken(QWEN_INFO, undefined)!, kvMiBPerToken(QWEN_INFO, "f16")!);
+});
+
+test("an incomplete model_info yields no number rather than a wrong one", () => {
+  assert.strictEqual(kvMiBPerToken(undefined, "q8_0"), null);
+  assert.strictEqual(kvMiBPerToken({ "x.block_count": 64 }, "q8_0"), null);
+});
+
+test("the suggestion reproduces the 4090 that was measured", () => {
+  // 19/08, before this machine's card was replaced: 24564 MiB total, the model
+  // loaded at 65536, and 1846 MiB free with the desktop up. 65536 leaves less
+  // than the margin, so the honest answer is a smaller window.
+  const fit = fitWindow({
+    totalMiB: 24564,
+    freeMiB: 1846,
+    anchorWindow: 65536,
+    kvMiBPerToken: kvMiBPerToken(QWEN_INFO, "q8_0")!,
+    headroomMiB: DEFAULT_HEADROOM_MIB,
+  })!;
+  assert.strictEqual(fit.numCtx, 49152);
+  assert.ok(fit.freeAtWindowMiB >= DEFAULT_HEADROOM_MIB);
+  assert.ok(fit.explanation.includes("24564 MiB on the card"), "the arithmetic must be shown");
+});
+
+test("a roomy card is still capped by the model's architecture", () => {
+  const per = kvMiBPerToken(QWEN_INFO, "q8_0")!;
+  const uncapped = fitWindow({
+    totalMiB: 32607, freeMiB: 30930, anchorWindow: 65536, kvMiBPerToken: per,
+    headroomMiB: DEFAULT_HEADROOM_MIB,
+  })!;
+  assert.strictEqual(uncapped.numCtx, 262144);
+
+  const capped = fitWindow({
+    totalMiB: 32607, freeMiB: 30930, anchorWindow: 65536, kvMiBPerToken: per,
+    headroomMiB: DEFAULT_HEADROOM_MIB, maxWindow: 131072,
+  })!;
+  assert.strictEqual(capped.numCtx, 131072, "nothing above the architectural max is offerable");
+});
+
+test("a card with no room to spare gets no suggestion", () => {
+  // Better to say nothing than to propose a window that will spill to CPU.
+  const fit = fitWindow({
+    totalMiB: 12288,
+    freeMiB: 200,
+    anchorWindow: 4096,
+    kvMiBPerToken: kvMiBPerToken(QWEN_INFO, "q8_0")!,
+    headroomMiB: DEFAULT_HEADROOM_MIB,
+  });
+  assert.strictEqual(fit, null);
 });
 
 console.log("\n=== All tests completed ===\n");
