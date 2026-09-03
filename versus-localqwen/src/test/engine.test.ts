@@ -28,7 +28,7 @@ import {
   resolveBudgetFloor,
 } from "../ollama/client";
 import { handleGetPhaseGuidance } from "../mcp/tools/guidance-tools";
-import { rankAskTools } from "../ask-tool";
+import { looksLikeAskTool, rankAskTools } from "../ask-tool";
 import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
 import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
 import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
@@ -2167,25 +2167,44 @@ test("R6 does not weaken R5 — complete, in blocks", () => {
   assert.ok(g.includes("findings 1-30 of 47"), "Phase 2 shows how to announce a split");
 });
 
-test("the ask-user picker puts the plausible tools first", () => {
-  const ranked = rankAskTools([
-    { name: "read_file", description: "Reads a file from disk" },
-    { name: "ask_user", description: "Puts a question to the user and waits" },
-    { name: "run_terminal", description: "Runs a shell command" },
-    { name: "confirm_action", description: "Requests approval before acting" },
-  ]);
-  assert.deepStrictEqual(ranked.slice(0, 2).map((t) => t.name), ["ask_user", "confirm_action"]);
+/** Descriptions copied from a real VS Code window, where the first ranking failed. */
+const REAL_TOOLS = [
+  { name: "copilot_applyPatch", description: "Edit text files. Do not use this tool to edit Jupyter notebooks." },
+  { name: "copilot_createNewWorkspace", description: "Get comprehensive setup steps to help the user create project structures" },
+  { name: "copilot_getErrors", description: "Get any compile or lint errors. If the user mentions errors or problems" },
+  { name: "copilot_readFile", description: "Read the contents of a file. You must specify the line range" },
+  { name: "copilot_memory", description: "Manage a persistent memory system with three scopes for storing notes" },
+];
+
+test("mentioning the user is not the same as asking the user", () => {
+  // The first version matched "user" anywhere, and nearly every tool
+  // description says it — "helps the user create project structures", "if the
+  // user mentions errors". Everything scored as a candidate and the ranking
+  // became alphabetical noise.
+  for (const t of REAL_TOOLS) {
+    assert.ok(!looksLikeAskTool(t), `${t.name} must not read as an ask-user tool`);
+  }
 });
 
-test("no tool is hidden from the picker", () => {
-  // A harness may name its tool something the pattern never anticipated. Hiding
-  // it would send the user back to typing a name from memory, which is the
-  // mistake the picker exists to prevent.
-  const tools = [{ name: "zzz_unlikely" }, { name: "ask_user" }, { name: "aaa_unlikely" }];
-  const ranked = rankAskTools(tools);
-  assert.strictEqual(ranked.length, 3);
+test("a tool whose purpose is asking is recognised", () => {
+  const asking = [
+    { name: "ask_user", description: "Puts a question to the user and waits for the answer" },
+    { name: "confirm_action", description: "Blocks until approved" },
+    { name: "promptUser", description: "" },
+    { name: "elicit", description: "" },
+    { name: "get_choice", description: "Presents options and waits for the user's choice" },
+  ];
+  for (const t of asking) assert.ok(looksLikeAskTool(t), `${t.name} should be a candidate`);
+});
+
+test("the likely tools come first, and nothing is hidden", () => {
+  const mixed = [...REAL_TOOLS, { name: "ask_user", description: "Asks the user a question" }];
+  const ranked = rankAskTools(mixed);
   assert.strictEqual(ranked[0].name, "ask_user");
-  assert.deepStrictEqual(ranked.slice(1).map((t) => t.name), ["aaa_unlikely", "zzz_unlikely"]);
+  assert.strictEqual(ranked.length, mixed.length, "a tool no pattern anticipates must stay reachable");
+  // Below the candidates, alphabetical — a stable order to scan.
+  const rest = ranked.slice(1).map((t) => t.name);
+  assert.deepStrictEqual(rest, [...rest].sort());
 });
 
 test("without an ask-user tool the questions stay chat blocks", () => {

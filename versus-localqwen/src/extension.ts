@@ -9,7 +9,7 @@ import { ContextStatus } from "./views/context-status";
 import { reportSiblings } from "./views/sibling-check";
 import { ensureEstimatorClamp } from "./views/estimator-patch-ui";
 import { ensureSpecsReadme, AGENT_INSTRUCTIONS_CONTENT } from "./setup";
-import { rankAskTools } from "./ask-tool";
+import { looksLikeAskTool, rankAskTools } from "./ask-tool";
 import { advertisedBudget, effectiveWindow, modelInfo } from "./ollama/client";
 import { alignModelContext } from "./ollama/align";
 import { promptForNumCtx } from "./ollama/align-ui";
@@ -300,9 +300,31 @@ export function activate(context: vscode.ExtensionContext) {
             value: "",
           },
         ];
-        if (ranked.length > 0) {
-          items.push({ label: "Registered tools", kind: vscode.QuickPickItemKind.Separator });
-          for (const t of ranked) {
+        const likely = ranked.filter(looksLikeAskTool);
+        if (likely.length > 0) {
+          items.push({
+            label: "Looks like it asks the user",
+            kind: vscode.QuickPickItemKind.Separator,
+          });
+          for (const t of likely) {
+            items.push({
+              label: `$(comment) ${t.name}`,
+              description: t.name === current ? "current" : undefined,
+              detail: t.description?.slice(0, 160),
+              value: t.name,
+            });
+          }
+        }
+        const rest = ranked.filter((t) => !looksLikeAskTool(t));
+        if (rest.length > 0) {
+          items.push({
+            label:
+              likely.length > 0
+                ? "Everything else registered here"
+                : "Registered here — none of them looks like it asks the user",
+            kind: vscode.QuickPickItemKind.Separator,
+          });
+          for (const t of rest) {
             items.push({
               label: `$(tools) ${t.name}`,
               description: t.name === current ? "current" : undefined,
@@ -324,7 +346,9 @@ export function activate(context: vscode.ExtensionContext) {
         );
 
         const picked = await vscode.window.showQuickPick(items, {
-          title: "Which tool should Versus use to ask the user a question?",
+          title:
+            "Which tool should Versus use to ask the user a question? " +
+            "(type to filter — try 'ask')",
           placeHolder:
             current === "" ? "Currently: none — questions are asked in chat" : `Currently: ${current}`,
           matchOnDetail: true,

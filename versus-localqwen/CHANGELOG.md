@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.11.4] - 2026-09-02
+
+### Fixed
+
+- **The ask-user picker ranked by a word that is in half the catalogue.** The
+  first pattern matched "user" anywhere, and nearly every tool description says
+  it — "helps the user create project structures", "if the user mentions errors".
+  Everything scored as a candidate, the ranking collapsed to alphabetical, and
+  the list gave no help deciding. Reported from a real window, where
+  `copilot_createNewWorkspace` and `copilot_getErrors` sat at the top.
+
+  The signal is now the tool's purpose: a name built around asking (`ask_user`,
+  `confirm`, `promptUser`, `elicit`), or a whole phrase that only appears when a
+  tool waits for someone — "asks the user", "waits for the response", "requests
+  confirmation". Those descriptions are pinned in a test so this cannot come back.
+
+### Changed
+
+- The picker separates "Looks like it asks the user" from "Everything else
+  registered here", so the candidates are visible rather than merely first. When
+  nothing qualifies, the heading says so — that is the answer to "which do I
+  pick?" when the window simply has no such tool, and manual entry is right below.
+- The title says the list is filterable, since typing `ask` finds it faster than
+  scrolling past forty entries.
+
 ## [0.11.3] - 2026-09-02
 
 ### Added
