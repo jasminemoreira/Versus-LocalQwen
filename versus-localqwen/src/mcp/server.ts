@@ -10,6 +10,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import * as fs from "fs";
+import * as path from "path";
 import { StateEngine } from "../state/engine";
 import { ALL_TOOLS, handleToolCall } from "./tools/index";
 import { Elicitor } from "./tools/ask-tools";
@@ -113,12 +115,26 @@ async function main() {
     console.error(
       `[versus] client ${info?.name ?? "unknown"} ${info?.version ?? ""} offers: ${offered}`
     );
-    console.error(
-      caps.elicitation
-        ? "[versus] elicitation available — ask_user will open a dialog the model cannot answer"
-        : "[versus] elicitation NOT offered by this client — ask_user falls back to a chat block, " +
-          "which stops the model only if it chooses to stop"
-    );
+    const verdict = caps.elicitation
+      ? "elicitation available — ask_user will open a dialog the model cannot answer"
+      : "elicitation NOT offered by this client — ask_user falls back to a chat block, " +
+        "which stops the model only if it chooses to stop";
+    console.error(`[versus] ${verdict}`);
+
+    // Also to disk. The stderr goes to an output channel that takes three steps
+    // to find, and the question it answers — dialog or chat block — comes up
+    // every time a question arrives as prose. One line, overwritten each start,
+    // inside the directory this project already owns.
+    try {
+      fs.writeFileSync(
+        path.join(workspacePath, ".versus", "mcp-client.log"),
+        `${new Date().toISOString()} ${info?.name ?? "unknown"} ${info?.version ?? ""}\n` +
+          `offers: ${offered}\n${verdict}\n`,
+        "utf-8"
+      );
+    } catch {
+      /* diagnostics never block the server */
+    }
   };
 
   const transport = new StdioServerTransport();
