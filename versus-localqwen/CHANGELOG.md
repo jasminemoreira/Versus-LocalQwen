@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.1] - 2026-09-03
+
+Patch: one timed-out `ask_user` no longer sends the model to chat for the rest of
+the session.
+
+### Fixed
+
+- **After an `ask_user` timeout, the model gave up on the tool.** This host aborts
+  a pending elicitation when the person is slow to answer. The model correctly
+  fell back to the chat block for that question — but then kept asking in chat for
+  every question after it, as if the tool had gone away. It hadn't: calling
+  `ask_user` again works immediately (confirmed — an explicit "ask again with
+  `ask_user`" always succeeds).
+
+  R2 told the model to fall back on a failed call but never told it the failure
+  was transient. Added that: a timeout is the host cancelling a slow answer, not
+  the tool disappearing, so the fallback covers only that one question and the
+  model must resume `ask_user` on the next decision. No host or timeout change —
+  the timeout is the client's and not configurable; this is the behavioral half
+  the guidance was missing.
+
 ## [0.13.0] - 2026-09-03
 
 Minor bump: the instruction file stops fixing a format, and starts being kept up

@@ -2279,6 +2279,10 @@ test("with an ask-user tool the questions go through it", () => {
   // The option shape survives: only the delivery changes, not what is asked.
   assert.ok(g.includes("**Option A (Recommended)**"));
   assert.ok(g.includes("fall back to writing the block above"), "a missing tool must not dead-end");
+  // A timeout is the host cancelling a slow answer, not the tool going away — the
+  // fallback is for that one question, and the tool must be resumed next time.
+  assert.ok(g.includes("A timeout is NOT the tool going away"), "a timeout must not read as the tool disappearing");
+  assert.ok(g.includes("keep calling `ask_user` for the next decision"), "after a fallback the tool must be resumed");
 });
 
 test("the ask-user rule is in the part that always arrives", () => {

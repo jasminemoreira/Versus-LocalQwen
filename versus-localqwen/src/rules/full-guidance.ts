@@ -47,7 +47,7 @@ Put the options in the call, one per option, each with a short explanation and t
 3. **Option C** — short explanation
 ---
 
-Rules: ONE question per call. Max 4 questions before acting on the answers. If the call fails or the tool is unavailable, fall back to writing the block above in chat and STOP your turn there.`
+Rules: ONE question per call. Max 4 questions before acting on the answers. If the call fails or the tool is unavailable, fall back to writing the block above in chat and STOP your turn there. A timeout is NOT the tool going away — this host cancels a pending call when the person is slow to answer, and \`${askUserTool}\` works the instant you call it again. So a fallback covers THAT one question only: keep calling \`${askUserTool}\` for the next decision. Never drop to chat for the rest of the session just because one call timed out.\``
     : `R2: Every user decision asked directly in chat. MANDATORY FORMAT — follow this template exactly:
 
 ---
