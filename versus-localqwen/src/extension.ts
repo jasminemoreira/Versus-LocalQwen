@@ -9,7 +9,7 @@ import { ContextStatus } from "./views/context-status";
 import { reportSiblings } from "./views/sibling-check";
 import { ensureEstimatorClamp } from "./views/estimator-patch-ui";
 import { ensureSpecsReadme, AGENT_INSTRUCTIONS_CONTENT } from "./setup";
-import { looksLikeAskTool, rankAskTools } from "./ask-tool";
+import { bestAskTool, looksLikeAskTool, rankAskTools } from "./ask-tool";
 import { advertisedBudget, effectiveWindow, modelInfo } from "./ollama/client";
 import { alignModelContext } from "./ollama/align";
 import { promptForNumCtx } from "./ollama/align-ui";
@@ -76,6 +76,33 @@ async function suggestWindow(
     });
   } catch {
     return null; // a suggestion is a convenience; never let it break the command
+  }
+}
+
+
+/**
+ * Persists the choice and offers the reload it needs.
+ *
+ * Workspace scope when there is one: the same machine runs different models in
+ * different windows, and the tool belongs to whichever harness this project
+ * talks to. The MCP server reads VERSUS_ASK_USER_TOOL once, when VS Code spawns
+ * it, so the choice only reaches the guidance after a restart — better offered
+ * than left to be discovered.
+ */
+async function applyAskUserTool(cfg: vscode.WorkspaceConfiguration, chosen: string): Promise<void> {
+  const target = vscode.workspace.workspaceFolders?.length
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  await cfg.update("askUserTool", chosen, target);
+  const scope = target === vscode.ConfigurationTarget.Workspace ? "this workspace" : "globally";
+  log(`setAskUserTool: ${chosen || "(none)"} for ${scope}`);
+
+  const next = await vscode.window.showInformationMessage(
+    chosen ? `Versus will ask through '${chosen}' (${scope}).` : `Versus will ask in chat (${scope}).`,
+    "Reload Window"
+  );
+  if (next === "Reload Window") {
+    vscode.commands.executeCommand("workbench.action.reloadWindow");
   }
 }
 
@@ -289,6 +316,42 @@ export function activate(context: vscode.ExtensionContext) {
         // through the filter box.
         const ranked = rankAskTools(registered);
 
+        // With one obvious candidate the question is on or off, not which of
+        // forty. The full list stays one keystroke away for the cases it is not.
+        const best = bestAskTool(registered);
+        if (best && current !== best.name) {
+          const answer = await vscode.window.showQuickPick(
+            [
+              {
+                label: `$(check) Yes — ask through '${best.name}'`,
+                detail: best.description?.slice(0, 160),
+                pick: best.name,
+              },
+              {
+                label: "$(comment-discussion) No — ask in chat",
+                detail:
+                  "Each question is written as a chat block and the turn stops. Right where the " +
+                  "host has no tool for it, but prose only stops a model that chooses to stop.",
+                pick: "",
+              },
+              {
+                label: "$(list-unordered) Choose a different tool…",
+                detail: `${registered.length} tools are registered in this window`,
+                pick: undefined,
+              },
+            ],
+            {
+              title: "Ask the user through a tool?",
+              placeHolder: `This window registers '${best.name}' — it asks and waits for an answer.`,
+            }
+          );
+          if (!answer) return;
+          if (answer.pick !== undefined) {
+            await applyAskUserTool(cfg, answer.pick);
+            return;
+          }
+        }
+
         type Item = vscode.QuickPickItem & { value?: string; manual?: boolean };
         const items: Item[] = [
           {
@@ -367,28 +430,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (chosen === undefined || chosen === current) return;
 
-        // Workspace when there is one: the same machine runs different models in
-        // different windows, and the tool belongs to whichever harness this
-        // project talks to.
-        const target = vscode.workspace.workspaceFolders?.length
-          ? vscode.ConfigurationTarget.Workspace
-          : vscode.ConfigurationTarget.Global;
-        await cfg.update("askUserTool", chosen, target);
-        const scope = target === vscode.ConfigurationTarget.Workspace ? "this workspace" : "globally";
-        log(`setAskUserTool: ${chosen || "(none)"} for ${scope}`);
-
-        // The MCP server reads VERSUS_ASK_USER_TOOL once, when VS Code spawns it,
-        // so the setting only reaches the guidance after a restart.
-        const next = await vscode.window.showInformationMessage(
-          chosen
-            ? `Versus will ask through '${chosen}' (${scope}).`
-            : `Versus will ask in chat (${scope}).`,
-          { modal: false, detail: "" },
-          "Reload Window"
-        );
-        if (next === "Reload Window") {
-          vscode.commands.executeCommand("workbench.action.reloadWindow");
-        }
+        await applyAskUserTool(cfg, chosen);
       })
     );
 

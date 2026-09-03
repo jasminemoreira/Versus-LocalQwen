@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.11.5] - 2026-09-02
+
+### Changed
+
+- **The ask-user choice is a yes/no where there is an obvious answer.** It was a
+  list of forty tools for a decision that is really on or off. When exactly one
+  registered tool scores above the rest, the command now asks "Ask the user
+  through a tool?" with three entries: yes through that one, no and ask in chat,
+  or open the full list. In the window this was reported from, that resolves to
+  `vscode_askQuestions` — the only tool there named for asking questions rather
+  than for confirmations.
+
+  A tie at the top is not a winner: two equally named tools open the full list
+  instead of a confident guess between them.
+
+### Fixed
+
+- **`open_browser_page` and `run_in_terminal` were being offered as ask-user
+  tools.** They reached the shortlist through phrases in their descriptions —
+  prose that mentions prompts and confirmations in passing. Scoring now reads the
+  NAME only: a tool built to ask is named for it, and every attempt to infer
+  intent from description text has produced false candidates. Two rounds of them.
+- Names are graded rather than accepted flatly: asking a question (`ask`,
+  `question`, `choice`, `elicit`) outranks asking for approval (`confirm`,
+  `prompt`), because a yes/no is not a question with options — which is what the
+  methodology's R2 block is.
+
+### Notes
+
+- Nothing is filtered from the full list, still. A harness may name its tool
+  something no pattern anticipates, and hiding it would send the user back to
+  typing a name from memory.
+
 ## [0.11.4] - 2026-09-02
 
 ### Fixed

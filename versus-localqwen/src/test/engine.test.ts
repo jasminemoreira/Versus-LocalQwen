@@ -28,7 +28,7 @@ import {
   resolveBudgetFloor,
 } from "../ollama/client";
 import { handleGetPhaseGuidance } from "../mcp/tools/guidance-tools";
-import { looksLikeAskTool, rankAskTools } from "../ask-tool";
+import { askToolScore, bestAskTool, looksLikeAskTool, rankAskTools } from "../ask-tool";
 import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
 import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
 import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
@@ -2186,15 +2186,38 @@ test("mentioning the user is not the same as asking the user", () => {
   }
 });
 
-test("a tool whose purpose is asking is recognised", () => {
-  const asking = [
-    { name: "ask_user", description: "Puts a question to the user and waits for the answer" },
-    { name: "confirm_action", description: "Blocks until approved" },
-    { name: "promptUser", description: "" },
-    { name: "elicit", description: "" },
-    { name: "get_choice", description: "Presents options and waits for the user's choice" },
+test("a tool named for asking is recognised, by its name alone", () => {
+  // Descriptions are prose about a tool, and every attempt to read intent out of
+  // them produced false candidates — open_browser_page and run_in_terminal both
+  // reached the shortlist that way.
+  for (const name of ["ask_user", "vscode_askQuestions", "elicit", "get_choice"]) {
+    assert.strictEqual(askToolScore({ name }), 2, `${name} asks a question`);
+  }
+  for (const name of ["confirm_action", "vscode_get_confirmation", "promptUser"]) {
+    assert.strictEqual(askToolScore({ name }), 1, `${name} asks for approval, which is adjacent`);
+  }
+  for (const name of ["open_browser_page", "run_in_terminal", "copilot_readFile"]) {
+    assert.strictEqual(askToolScore({ name }), 0, `${name} asks nobody anything`);
+  }
+});
+
+test("one clear winner turns the choice into on or off", () => {
+  // The real window: one tool named for questions, four for confirmations.
+  const window = [
+    { name: "open_browser_page" },
+    { name: "run_in_terminal" },
+    { name: "vscode_askQuestions" },
+    { name: "vscode_get_confirmation" },
+    { name: "vscode_get_confirmation_with_options" },
+    { name: "vscode_get_terminal_confirmation" },
   ];
-  for (const t of asking) assert.ok(looksLikeAskTool(t), `${t.name} should be a candidate`);
+  assert.strictEqual(bestAskTool(window)!.name, "vscode_askQuestions");
+
+  // A tie at the top is not a winner: two question tools deserve the full list
+  // rather than a confident guess between them.
+  assert.strictEqual(bestAskTool([{ name: "ask_user" }, { name: "askTheHuman" }]), null);
+  // And neither is an empty field.
+  assert.strictEqual(bestAskTool([{ name: "copilot_readFile" }]), null);
 });
 
 test("the likely tools come first, and nothing is hidden", () => {

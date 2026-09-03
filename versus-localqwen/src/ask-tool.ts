@@ -1,35 +1,60 @@
-// Telling apart a tool that puts a question to a person from one that merely
-// mentions people.
+// Finding the tool that puts a question to a person, among everything a window
+// happens to register.
 //
-// The first version matched the word "user" anywhere, and nearly every tool
-// description says "the user" — "helps the user create project structures",
-// "if the user mentions errors". Everything scored as a candidate, the ranking
-// became alphabetical noise, and the picker gave no help at all. The signal has
-// to be the tool's PURPOSE, which lives in its name and in a few phrases that
-// only appear when a tool actually waits for an answer.
+// Two mistakes are already behind this file. Matching the word "user" anywhere
+// caught nearly every tool, because descriptions say "the user" constantly.
+// Matching phrases in descriptions then caught `open_browser_page` and
+// `run_in_terminal`, whose text mentions prompts and confirmations in passing.
+// The reliable signal is the NAME: a tool built to ask is named for it, and a
+// tool that merely talks about users is not.
 
 export interface ToolLike {
   name: string;
   description?: string;
 }
 
-/** A name built around asking: `ask_user`, `confirm`, `promptUser`, `elicit`. */
-const ASKING_NAME = /(^|[_\-.\b])(ask|asks|confirm|confirms|prompt|prompts|elicit|inquire)/i;
+/** Asks a question and waits for an answer — the thing the methodology needs. */
+const ASKS_A_QUESTION = /(^|[_.\-])(ask|asks|question|questions|choice|choices|elicit|inquire)/i;
+
+/** Asks for approval. Adjacent, usable, but a yes/no is not a question with options. */
+const ASKS_APPROVAL = /(^|[_.\-])(confirm|confirms|confirmation|prompt|prompts)/i;
 
 /**
- * Phrases that appear when a tool waits for a person, and not otherwise.
- * Deliberately whole phrases: "user" alone is in half the tool catalogue.
+ * How well a tool fits "put this question to the user and wait".
+ *
+ * 2 = named for asking questions, 1 = named for confirmations, 0 = neither.
+ * Descriptions are deliberately not consulted: they are prose about a tool, and
+ * every attempt to read intent out of them has produced false candidates.
  */
-const ASKING_PHRASE =
-  /asks? the (user|human)|prompts? the (user|human)|wait(s|ing)? for (the )?(user|human|answer|response)|(user|human)'?s? (answer|response|reply|choice)|request(s)? (user )?(input|confirmation|approval)|requires? (user )?confirmation|present(s)? (the )?(user|options)/i;
+export function askToolScore(tool: ToolLike): 0 | 1 | 2 {
+  if (ASKS_A_QUESTION.test(tool.name)) return 2;
+  if (ASKS_APPROVAL.test(tool.name)) return 1;
+  return 0;
+}
 
-/** True when the tool's own purpose is to put a question to a person. */
+/** True for anything worth offering as the ask-user tool. */
 export function looksLikeAskTool(tool: ToolLike): boolean {
-  return ASKING_NAME.test(tool.name) || ASKING_PHRASE.test(tool.description ?? "");
+  return askToolScore(tool) > 0;
 }
 
 /**
- * The same tools, likely ones first, each group alphabetical.
+ * The single obvious candidate, or null when the choice is not obvious.
+ *
+ * Null means either nothing qualifies or several tie at the top, and both cases
+ * deserve the full list rather than a confident guess. When one tool scores
+ * above all others, the question stops being "which of forty" and becomes
+ * on or off — which is what it should have been from the start.
+ */
+export function bestAskTool<T extends ToolLike>(tools: readonly T[]): T | null {
+  const scored = tools.map((t) => ({ tool: t, score: askToolScore(t) })).filter((s) => s.score > 0);
+  if (scored.length === 0) return null;
+  const top = Math.max(...scored.map((s) => s.score));
+  const leaders = scored.filter((s) => s.score === top);
+  return leaders.length === 1 ? leaders[0].tool : null;
+}
+
+/**
+ * The same tools, best fit first, each group alphabetical.
  *
  * Nothing is filtered out. A harness may name its tool something no pattern
  * anticipates, and hiding it would send the user back to typing a name from
@@ -37,7 +62,6 @@ export function looksLikeAskTool(tool: ToolLike): boolean {
  */
 export function rankAskTools<T extends ToolLike>(tools: readonly T[]): T[] {
   return [...tools].sort(
-    (a, b) =>
-      Number(looksLikeAskTool(b)) - Number(looksLikeAskTool(a)) || a.name.localeCompare(b.name)
+    (a, b) => askToolScore(b) - askToolScore(a) || a.name.localeCompare(b.name)
   );
 }
