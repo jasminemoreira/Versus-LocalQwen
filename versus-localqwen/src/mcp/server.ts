@@ -12,6 +12,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { StateEngine } from "../state/engine";
 import { ALL_TOOLS, handleToolCall } from "./tools/index";
+import { Elicitor } from "./tools/ask-tools";
 
 function getWorkspacePath(): string {
   // Priority: --workspace arg > CLAUDE_PROJECT_DIR env > VERSUS_WORKSPACE env > cwd
@@ -37,7 +38,7 @@ async function main() {
   const server = new Server(
     {
       name: "versus-localqwen",
-      version: "0.11.5",
+      version: "0.12.0",
     },
     {
       capabilities: {
@@ -45,6 +46,22 @@ async function main() {
       },
     }
   );
+
+  /**
+   * Asking the user through the protocol instead of through the model.
+   *
+   * The capability is negotiated at initialize, so it can only be read after the
+   * client has connected — hence a function rather than a value. Where the client
+   * does not offer it, `ask_user` says so and the model falls back to the chat
+   * block, which is what every host had before this existed.
+   */
+  const elicitor: Elicitor = {
+    supportsElicitation: () => server.getClientCapabilities()?.elicitation !== undefined,
+    // Cast at the adapter: the tool describes its form with a plain object so it
+    // stays testable without the SDK, and the client validates the schema anyway.
+    elicit: (params) =>
+      server.elicitInput({ ...params, mode: "form" } as Parameters<typeof server.elicitInput>[0]),
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools: ALL_TOOLS };
@@ -59,7 +76,12 @@ async function main() {
       // so disk is authoritative. Without this the evidence gates would judge a
       // snapshot taken at startup.
       engine.load();
-      const result = await handleToolCall(name, (args ?? {}) as Record<string, unknown>, engine);
+      const result = await handleToolCall(
+        name,
+        (args ?? {}) as Record<string, unknown>,
+        engine,
+        elicitor
+      );
       return {
         content: [{ type: "text" as const, text: result }],
       };

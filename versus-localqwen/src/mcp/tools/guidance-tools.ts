@@ -5,14 +5,17 @@ import { StateEngine } from "../../state/engine";
 import { getFullGuidance, splitGuidance } from "../../rules/full-guidance";
 
 /**
- * The tool this host offers for putting a question to the user, if any.
+ * The tool the model should put user decisions through, if any.
  *
- * Set by the extension from `versus-localqwen.askUserTool`. Empty means the host
- * has none and the methodology's questions stay chat blocks.
+ * Our own `ask_user` wherever the client negotiated elicitation — no
+ * configuration, and the answer comes from the person rather than from the
+ * model. `versus-localqwen.askUserTool` stays as an override for a host with a
+ * tool of its own; empty on both means the questions stay chat blocks.
  */
-function askUserTool(): string | undefined {
-  const name = (process.env.VERSUS_ASK_USER_TOOL || "").trim();
-  return name || undefined;
+export function resolveAskUserTool(elicitationAvailable: boolean): string | undefined {
+  const override = (process.env.VERSUS_ASK_USER_TOOL || "").trim();
+  if (override) return override;
+  return elicitationAvailable ? "ask_user" : undefined;
 }
 
 export const getPhaseGuidanceTool: Tool = {
@@ -45,7 +48,8 @@ export const getPhaseGuidanceTool: Tool = {
 
 export function handleGetPhaseGuidance(
   engine: StateEngine,
-  args: { phase?: number; part?: number }
+  args: { phase?: number; part?: number },
+  askUserTool?: string
 ): string {
   const state = engine.getPhaseState();
 
@@ -59,7 +63,7 @@ export function handleGetPhaseGuidance(
         error: "Project not initialized. Only phase 0 guidance is available before init_project.",
       });
     }
-    return partResponse(0, null, args.part, { initialized: false });
+    return partResponse(0, null, args.part, askUserTool, { initialized: false });
   }
 
   const phase = args.phase ?? state.currentPhase;
@@ -68,7 +72,7 @@ export function handleGetPhaseGuidance(
     return JSON.stringify({ error: `Invalid phase: ${phase}. Use 0-7.` });
   }
 
-  return partResponse(phase, state.currentPhase, args.part);
+  return partResponse(phase, state.currentPhase, args.part, askUserTool);
 }
 
 /**
@@ -88,9 +92,10 @@ function partResponse(
   phase: number,
   currentPhase: number | null,
   requested: number | undefined,
+  askUserTool: string | undefined,
   extra: Record<string, unknown> = {}
 ): string {
-  const parts = splitGuidance(getFullGuidance(phase, { askUserTool: askUserTool() }));
+  const parts = splitGuidance(getFullGuidance(phase, { askUserTool }));
   const part = requested === undefined ? 1 : Math.trunc(requested);
 
   if (part < 1 || part > parts.length) {

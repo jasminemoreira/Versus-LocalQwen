@@ -27,7 +27,8 @@ import {
   ModelWindow,
   resolveBudgetFloor,
 } from "../ollama/client";
-import { handleGetPhaseGuidance } from "../mcp/tools/guidance-tools";
+import { handleGetPhaseGuidance, resolveAskUserTool } from "../mcp/tools/guidance-tools";
+import { ELICITATION_UNAVAILABLE, handleAskUser } from "../mcp/tools/ask-tools";
 import { askToolScore, bestAskTool, looksLikeAskTool, rankAskTools } from "../ask-tool";
 import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
 import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
@@ -166,6 +167,35 @@ function test(name: string, fn: () => void) {
     process.exitCode = 1;
   } finally {
     teardown();
+  }
+}
+
+/**
+ * An async test, deferred to the end of the run.
+ *
+ * `test` cannot take one: it calls fn() and prints the tick without awaiting, so
+ * a rejected assertion surfaces only as a non-zero exit code while the line above
+ * it claims a pass. That happened — four tests here reported green with a
+ * deliberately broken assertion — so async cases queue instead of pretending.
+ */
+const deferred: Array<{ name: string; fn: () => Promise<void> }> = [];
+function asyncTest(name: string, fn: () => Promise<void>) {
+  deferred.push({ name, fn });
+}
+
+async function runDeferred(): Promise<void> {
+  for (const { name, fn } of deferred) {
+    setup();
+    try {
+      await fn();
+      console.log(`  ✓ ${name}`);
+    } catch (err) {
+      console.error(`  ✗ ${name}`);
+      console.error(`    ${err}`);
+      process.exitCode = 1;
+    } finally {
+      teardown();
+    }
   }
 }
 
@@ -2479,4 +2509,88 @@ test("a decision long enough to fill the budget is shortened, not dropped", () =
   assert.ok(fit.kept[0].content.endsWith("[truncated]"), "and says it was cut");
 });
 
-console.log("\n=== All tests completed ===\n");
+
+console.log("\n=== Ask-User Tests ===\n");
+
+/** A client that negotiated elicitation, answering with `reply`. */
+function elicitorThatAnswers(reply: Record<string, unknown>, action: "accept" | "decline" | "cancel" = "accept") {
+  const seen: any[] = [];
+  return {
+    seen,
+    supportsElicitation: () => true,
+    elicit: async (params: any) => {
+      seen.push(params);
+      return { action, content: action === "accept" ? reply : undefined };
+    },
+  };
+}
+
+/** A client that did not offer the capability at all. */
+const noElicitation = { supportsElicitation: () => false, elicit: async () => ({ action: "cancel" as const }) };
+
+asyncTest("the answer comes from the user, not from the model", async () => {
+  const e = elicitorThatAnswers({ answer: "MVP first, then iterate" });
+  const out = JSON.parse(await handleAskUser(e, {
+    question: "What is the delivery target?",
+    options: ["Complete product (recommended)", "MVP first, then iterate", "Prototype"],
+  }));
+  assert.strictEqual(out.status, "answered");
+  assert.strictEqual(out.answer, "MVP first, then iterate");
+  // The options reach the dialog as a closed set the person picks from.
+  assert.deepStrictEqual(e.seen[0].requestedSchema.properties.answer.enum, [
+    "Complete product (recommended)",
+    "MVP first, then iterate",
+    "Prototype",
+  ]);
+  assert.deepStrictEqual(e.seen[0].requestedSchema.required, ["answer"]);
+});
+
+asyncTest("an open question needs no options", async () => {
+  const e = elicitorThatAnswers({ answer: "chess, but only the endgame" });
+  const out = JSON.parse(await handleAskUser(e, { question: "What are we building?" }));
+  assert.strictEqual(out.answer, "chess, but only the endgame");
+  assert.strictEqual(e.seen[0].requestedSchema.properties.answer.enum, undefined);
+});
+
+asyncTest("declining is not an answer, and neither is dismissing", async () => {
+  for (const action of ["decline", "cancel"] as const) {
+    const out = JSON.parse(
+      await handleAskUser(elicitorThatAnswers({}, action), { question: "Which board?" })
+    );
+    assert.strictEqual(out.status, action);
+    assert.ok(!("answer" in out), "nothing may be reported as the user's answer");
+    assert.ok(/Do not decide for them|Ask again/.test(out.instruction));
+  }
+});
+
+asyncTest("a host without elicitation is told to fall back, not given an error", async () => {
+  // An error would send the model looking for a different tool. The chat block
+  // is a correct fallback and it should be named as one.
+  const out = JSON.parse(await handleAskUser(noElicitation, { question: "Which target?" }));
+  assert.strictEqual(out.status, ELICITATION_UNAVAILABLE);
+  assert.ok(out.instruction.includes("R2 block"));
+  assert.ok(out.instruction.includes("STOP your turn"));
+  assert.strictEqual(out.question, "Which target?");
+});
+
+test("R2 points at our own tool when the client can show a dialog", () => {
+  // No configuration: the capability is negotiated, so the guidance can simply
+  // know. The setting stays as an override for a host with a better tool.
+  const before = process.env.VERSUS_ASK_USER_TOOL;
+  try {
+    delete process.env.VERSUS_ASK_USER_TOOL;
+    assert.strictEqual(resolveAskUserTool(true), "ask_user");
+    assert.strictEqual(resolveAskUserTool(false), undefined);
+
+    process.env.VERSUS_ASK_USER_TOOL = "vscode_askQuestions";
+    assert.strictEqual(resolveAskUserTool(true), "vscode_askQuestions", "the override wins");
+    assert.strictEqual(resolveAskUserTool(false), "vscode_askQuestions");
+  } finally {
+    if (before === undefined) delete process.env.VERSUS_ASK_USER_TOOL;
+    else process.env.VERSUS_ASK_USER_TOOL = before;
+  }
+});
+
+runDeferred().then(() => {
+  console.log("\n=== All tests completed ===\n");
+});

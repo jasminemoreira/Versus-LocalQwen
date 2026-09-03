@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.12.0] - 2026-09-03
+
+Minor bump: a new tool, and the ask-user question stops needing configuration.
+
+### Added
+
+- **`ask_user`, backed by MCP elicitation.** The methodology's questions were
+  chat blocks, which stop the model only as far as the model chooses to stop —
+  against an agentic model, not far: phases advanced with the questions answered
+  by the model itself. Elicitation is the protocol's own answer: the server asks,
+  the client renders a dialog, and the value comes back from the person. The model
+  cannot supply it, cannot skip it, and cannot mistake its own reasoning for a
+  decision that was made.
+
+  R2 now points at it wherever the client negotiated the capability — **no setting
+  and no tool name to type**. `versus-localqwen.askUserTool` is demoted to an
+  override for a host with a tool of its own, and the chat block stays as the
+  fallback where neither exists.
+
+### Fixed
+
+- **Four tests were passing vacuously.** The runner called `fn()` and printed the
+  tick without awaiting, so an async assertion failed only into a non-zero exit
+  code while the line above it claimed a pass. Verified by breaking one on
+  purpose: it printed ✓. Async cases are queued and awaited now, and the same
+  broken assertion prints ✗.
+
+### Notes
+
+- Declining and dismissing are reported as themselves, never as an answer, with
+  instructions that do not invite the model to decide instead.
+- A host without elicitation gets a plain `elicitation-unavailable` status naming
+  the fallback, not an error — an error would send the model hunting for a
+  different tool.
+- Verified against the installed SDK (1.26.0) and the capability the client sends
+  at initialize; VS Code has supported elicitation since the 2025-06-18 spec.
+- The tool surface grew from 18 tools to 19, 3221 to 3434 tokens.
+- This partly retires 0.11.1 through 0.11.5 — the setting, the picker and its
+  ranking. That work was not wasted: it is what showed that GLM's `ask_user` is
+  not in `vscode.lm.tools` at all, which is what sent me looking at the protocol.
+
 ## [0.11.5] - 2026-09-02
 
 ### Changed

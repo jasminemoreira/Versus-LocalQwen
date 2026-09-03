@@ -9,10 +9,11 @@ import { recordDecisionTool, updateScoreTool, markExitCriterionTool, handleRecor
 import { checkSafeguardTool, checkAllSafeguardsTool, handleCheckSafeguard, handleCheckAllSafeguards } from "./safeguard-tools";
 import { checkSpecsStatusTool, handleCheckSpecsStatus } from "./specs-tools";
 import { initProjectTool, handleInitProject } from "./project-tools";
-import { getPhaseGuidanceTool, handleGetPhaseGuidance } from "./guidance-tools";
+import { getPhaseGuidanceTool, handleGetPhaseGuidance, resolveAskUserTool } from "./guidance-tools";
 import { checkContextBudgetTool, handleCheckContextBudget } from "./context-tools";
 import { recordTestOutcomeTool, handleRecordTestOutcome } from "./loop-tools";
 import { recordActivatedLensesTool, handleRecordActivatedLenses } from "./lens-tools";
+import { Elicitor, askUserTool, handleAskUser } from "./ask-tools";
 
 export const ALL_TOOLS: Tool[] = [
   getPhaseStateTool,
@@ -33,6 +34,7 @@ export const ALL_TOOLS: Tool[] = [
   checkContextBudgetTool,
   recordTestOutcomeTool,
   recordActivatedLensesTool,
+  askUserTool,
 ];
 
 /**
@@ -67,9 +69,10 @@ const CONTEXT_WARNING =
 export async function handleToolCall(
   toolName: string,
   args: Record<string, unknown>,
-  engine: StateEngine
+  engine: StateEngine,
+  elicitor?: Elicitor
 ): Promise<string> {
-  const result = await dispatch(toolName, args, engine);
+  const result = await dispatch(toolName, args, engine, elicitor);
 
   // Gateway guard: warns models that haven't loaded context
   if (!GUARD_EXEMPT.has(toolName) && engine.isContextStale()) {
@@ -128,12 +131,21 @@ function sanitize(args: Record<string, unknown>): Record<string, unknown> {
 async function dispatch(
   toolName: string,
   rawArgs: Record<string, unknown>,
-  engine: StateEngine
+  engine: StateEngine,
+  elicitor?: Elicitor
 ): Promise<string> {
   const args = sanitize(rawArgs);
   switch (toolName) {
     case "check_context_budget":
       return handleCheckContextBudget(args as { planned_chars?: number; intent?: string }, toolSurface());
+    case "ask_user":
+      // Without an elicitor the tool still answers, telling the model to fall
+      // back to the chat block — never an error it might read as "wrong tool".
+      return handleAskUser(elicitor ?? { supportsElicitation: () => false, elicit: async () => ({ action: "cancel" }) }, args as {
+        question?: string;
+        options?: unknown;
+        context?: string;
+      });
     case "record_activated_lenses":
       return handleRecordActivatedLenses(engine, args as { conditional?: unknown; notActivated?: unknown });
     case "record_test_outcome":
@@ -171,7 +183,11 @@ async function dispatch(
     case "init_project":
       return handleInitProject(engine, args as { name: string; description: string; bootstrap_data?: Record<string, unknown> });
     case "get_phase_guidance":
-      return handleGetPhaseGuidance(engine, args as { phase?: number; part?: number });
+      return handleGetPhaseGuidance(
+        engine,
+        args as { phase?: number; part?: number },
+        resolveAskUserTool(elicitor?.supportsElicitation() ?? false)
+      );
     case "update_project_spec":
       return handleUpdateProjectSpec(engine, args as { stack?: string[]; outOfScope?: string[]; patterns?: string[]; constraints?: string[] });
     case "start_new_cycle":
