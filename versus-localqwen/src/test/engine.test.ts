@@ -28,7 +28,7 @@ import {
   resolveBudgetFloor,
 } from "../ollama/client";
 import { handleGetPhaseGuidance } from "../mcp/tools/guidance-tools";
-import { handleGetPhaseState } from "../mcp/tools/state-tools";
+import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
 import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
 import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
 import {
@@ -2339,6 +2339,80 @@ test("a card with no room to spare gets no suggestion", () => {
     headroomMiB: DEFAULT_HEADROOM_MIB,
   });
   assert.strictEqual(fit, null);
+});
+
+
+console.log("\n=== State Snapshot Delivery Tests ===\n");
+
+test("the state snapshot stays inside the host's inline limit", () => {
+  // Measured on this host: 5691 chars arrived inline, 8377 was written to a
+  // session-resource file instead. get_phase_state is the gateway guard — the
+  // one call the model is told to make first — so a snapshot that lands on disk
+  // loses the project's state, silently.
+  engine.initProject("big", "a project that ran long");
+  for (let i = 0; i < 80; i++) {
+    engine.recordDecision(i % 8, "architecture", `decision ${i}: ${"x".repeat(400)}`);
+  }
+  engine.updateProjectSpec({
+    stack: Array.from({ length: 40 }, (_, i) => `stack item ${i} ${"y".repeat(60)}`),
+    constraints: Array.from({ length: 40 }, (_, i) => `constraint ${i} ${"z".repeat(60)}`),
+  });
+
+  const out = handleGetPhaseState(engine);
+  assert.ok(out.length <= 5691, `snapshot is ${out.length} chars; it would be externalized`);
+});
+
+test("what was left out is said, with where to find it", () => {
+  engine.initProject("big", "long");
+  for (let i = 0; i < 40; i++) {
+    engine.recordDecision(0, "scope", `decision ${i}: ${"x".repeat(500)}`);
+  }
+  const out = JSON.parse(handleGetPhaseState(engine));
+  assert.ok(out._decisionsNote.includes("get_decisions"), "point at the full text");
+  assert.ok(out._decisionsNote.includes("40 are on record"), "say how many exist");
+  assert.ok(out.recentDecisions.length >= 1, "at least the newest survives");
+});
+
+test("a small project loses nothing", () => {
+  engine.initProject("small", "short");
+  engine.recordDecision(0, "scope", "out of scope: i18n");
+  engine.updateProjectSpec({ stack: ["TypeScript"] });
+  const out = JSON.parse(handleGetPhaseState(engine));
+  assert.strictEqual(out.recentDecisions.length, 1);
+  assert.strictEqual(out._decisionsNote, undefined, "no note when nothing was dropped");
+  assert.strictEqual(out._specNote, undefined);
+  assert.deepStrictEqual(out.projectSpec.stack, ["TypeScript"], "values, not stamped entries");
+});
+
+test("the spec reaches the model as values, and the stamps stay on disk", () => {
+  // The {value, phase, at} shape exists so an external analysis can date the
+  // spec from state.json; the stamp costs ~50 chars an entry and the model never
+  // reads it. Five kilobytes of metadata across a hundred entries.
+  engine.initProject("spec", "stamps");
+  engine.updateProjectSpec({ stack: ["TypeScript", "Node 18+"] });
+  const out = JSON.parse(handleGetPhaseState(engine));
+  assert.deepStrictEqual(out.projectSpec.stack, ["TypeScript", "Node 18+"]);
+  const stored = engine.getPhaseState()!.projectSpec.stack[0] as { value: string; at: string };
+  assert.ok(stored.at, "the stamp is still on disk where the analysis reads it");
+});
+
+test("no spec list is starved out by a longer one", () => {
+  // A proportional share, floored: a project with 200 stack entries must not
+  // push its constraints out of the snapshot entirely.
+  const many = Array.from({ length: 200 }, (_, i) => `stack ${i} ${"y".repeat(40)}`);
+  engine.initProject("skew", "one huge list");
+  engine.updateProjectSpec({ stack: many, constraints: ["local model only", "no cloud fallback"] });
+  const out = JSON.parse(handleGetPhaseState(engine));
+  assert.ok(out.projectSpec.constraints.length > 0, "the short list must still appear");
+  assert.ok(out._specNote.includes("not shown"));
+});
+
+test("a decision long enough to fill the budget is shortened, not dropped", () => {
+  const one = [{ phase: 0, category: "scope", content: "x".repeat(5000) }];
+  const fit = fitDecisions(one, 2048);
+  assert.strictEqual(fit.kept.length, 1, "the newest decision always survives");
+  assert.strictEqual(fit.shortened, 1);
+  assert.ok(fit.kept[0].content.endsWith("[truncated]"), "and says it was cut");
 });
 
 console.log("\n=== All tests completed ===\n");

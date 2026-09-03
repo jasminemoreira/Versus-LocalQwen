@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.11.2] - 2026-09-02
+
+### Fixed
+
+- **`get_phase_state` was being written to disk instead of shown to the model.**
+  The guidance pagination in 0.10.0 fixed the payload that was spilling then; the
+  state snapshot grew past the same limit since. Measured on the live projects:
+  RestaUm returned **11.4 KB** and Goitacaz **49 KB**, against a host that keeps a
+  tool result inline only up to about 5.7 KB. Six spills in September, all of them
+  this call — and it is the gateway guard, the one call the model is told to make
+  before anything else, so what was lost was the project's state.
+
+  Now 4.7 KB and 5.4 KB respectively, both inline.
+
+### Changed
+
+- **The spec reaches the model as values.** Since 0.7.0 each entry carries
+  `{ value, phase, at }`; the stamp costs about 50 characters, which is five
+  kilobytes across a hundred entries, for metadata the model never reads. It
+  exists so an external analysis can date the spec from `state.json`, and that is
+  where it stays.
+- **Both collections are budgeted, and what was dropped is said.** Decisions are
+  shortened before any is dropped, and the note points at `get_decisions` and
+  gives the true count. Spec entries are never truncated — they run 27 to 50
+  characters and each is a distinct commitment, so half a constraint reads as a
+  different constraint; whole entries are dropped from the oldest end instead, and
+  counted. Each list gets a share of the budget proportional to its length with a
+  floor, so 200 stack entries cannot push two constraints out of the snapshot.
+- The `command` of the last test outcome is capped at 160 characters. One real
+  record held an entire heredoc — 2 KB of shell inside a state snapshot.
+
+### Notes
+
+- This answers a question worth recording: whether GLM would do better with the
+  full guidance injected instead of the paginated one. No — the spill limit is a
+  property of the chat host, not of the model or the provider, and September's
+  spills prove it still applies. Full injection would put the guidance straight
+  back on disk. What the evidence did show is that the guidance is now fine and
+  the state snapshot was the one being lost.
+
 ## [0.11.1] - 2026-09-02
 
 ### Added
