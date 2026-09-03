@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.11.1] - 2026-09-02
+
+### Added
+
+- **`versus-localqwen.askUserTool`: the questions go through a real tool where the
+  host has one.** R2 has always said every user decision is asked directly in
+  chat, and that works only as far as the model chooses to stop: a question
+  written as prose does not yield the turn. GLM's harness exposes an `ask_user`
+  tool; Qwen's does not, which is why the rule was written as a chat block in the
+  first place. When the setting names a tool, R2 tells the model to put every
+  decision through it — a tool call does yield the turn — keeping the same option
+  shape, and falling back to the chat block if the call fails.
+
+  Reported symptom this addresses: running against GLM, the phases advanced
+  without any question ever reaching the user.
+
+### Notes
+
+- **Configured, never inferred from the model name.** The tool comes from the
+  harness, not from the weights: the same model behind another endpoint may not
+  have it. A name list would also go stale — the `qwen3.6` → `qwen3.8` swap
+  already broke a pinned assumption this month — and guessing wrong means the
+  model calls a tool that is not there, mid-phase. Empty by default, so nothing
+  changes for the Qwen path.
+- The rule reaches the model through R2, which is a global rule and therefore
+  lands in part 1 of every phase — the one part a model that ignores the
+  `_nextAction` chain will still have read. A test pins that for four phases.
+- Delivery changes; the question does not. The option block, the recommended-first
+  ordering and the one-question-per-ask rule are identical in both variants, so a
+  project run either way is asking the same things.
+- The chat-block variant also gained the sentence it was missing: after asking,
+  stop the turn. Continuing past an unanswered question is deciding it alone.
+
 ## [0.11.0] - 2026-08-30
 
 Minor bump: a new setting, and `Align now` stops proposing one machine's number

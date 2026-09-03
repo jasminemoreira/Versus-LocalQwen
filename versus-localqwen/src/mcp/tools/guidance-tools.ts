@@ -4,6 +4,17 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { StateEngine } from "../../state/engine";
 import { getFullGuidance, splitGuidance } from "../../rules/full-guidance";
 
+/**
+ * The tool this host offers for putting a question to the user, if any.
+ *
+ * Set by the extension from `versus-localqwen.askUserTool`. Empty means the host
+ * has none and the methodology's questions stay chat blocks.
+ */
+function askUserTool(): string | undefined {
+  const name = (process.env.VERSUS_ASK_USER_TOOL || "").trim();
+  return name || undefined;
+}
+
 export const getPhaseGuidanceTool: Tool = {
   name: "get_phase_guidance",
   description:
@@ -79,7 +90,7 @@ function partResponse(
   requested: number | undefined,
   extra: Record<string, unknown> = {}
 ): string {
-  const parts = splitGuidance(getFullGuidance(phase));
+  const parts = splitGuidance(getFullGuidance(phase, { askUserTool: askUserTool() }));
   const part = requested === undefined ? 1 : Math.trunc(requested);
 
   if (part < 1 || part > parts.length) {

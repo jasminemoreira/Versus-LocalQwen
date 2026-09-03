@@ -2166,6 +2166,37 @@ test("R6 does not weaken R5 — complete, in blocks", () => {
   assert.ok(g.includes("findings 1-30 of 47"), "Phase 2 shows how to announce a split");
 });
 
+test("without an ask-user tool the questions stay chat blocks", () => {
+  const g = getFullGuidance(0);
+  assert.ok(g.includes("asked directly in chat"));
+  assert.ok(g.includes("Reply with the number"), "the reply line is what invites an answer");
+  assert.ok(g.includes("STOP your turn and wait"), "prose only stops a model that chooses to stop");
+});
+
+test("with an ask-user tool the questions go through it", () => {
+  const g = getFullGuidance(0, { askUserTool: "ask_user" });
+  assert.ok(g.includes("call `ask_user`"), "the tool must be named");
+  assert.ok(!g.includes("Reply with the number"), "the chat-only reply line does not belong here");
+  // The option shape survives: only the delivery changes, not what is asked.
+  assert.ok(g.includes("**Option A (Recommended)**"));
+  assert.ok(g.includes("fall back to writing the block above"), "a missing tool must not dead-end");
+});
+
+test("the ask-user rule is in the part that always arrives", () => {
+  // R2 is a global rule, so it is in part 1 — the only part a model that ignores
+  // the chain will ever read, and the one that must carry how to ask.
+  for (const phase of [0, 2, 4, 6]) {
+    const parts = splitGuidance(getFullGuidance(phase, { askUserTool: "ask_user" }));
+    assert.ok(parts[0].includes("call `ask_user`"), `phase ${phase} carries it in part 1`);
+  }
+});
+
+test("the tool name comes from the host, not from the model name", () => {
+  // Whatever the host calls it, that is what gets taught — no allowlist to go stale.
+  const g = getFullGuidance(1, { askUserTool: "prompt_the_human" });
+  assert.ok(g.includes("call `prompt_the_human`"));
+});
+
 test("the parts reassemble into exactly the whole guidance", () => {
   // The invariant that matters: splitting is a delivery change, not an edit.
   // Nothing may be dropped, duplicated, or reordered on the way out.

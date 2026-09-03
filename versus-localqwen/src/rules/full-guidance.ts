@@ -34,7 +34,21 @@ export const EMISSION_BUDGET_TOKENS = 1200;
 
 const GLOBAL_RULES = {
   R1: "R1: Evaluate triggers before coding. If triggered → Phase 0. Never skip to implementation.",
-  R2: `R2: Every user decision asked directly in chat. MANDATORY FORMAT — follow this template exactly:
+  R2: (askUserTool?: string): string => askUserTool
+    ? `R2: Every user decision goes to the user, and this host gives you a tool that actually does it: **call \`${askUserTool}\`**. Do not decide on the user's behalf, and do not write the question as prose and keep going — a question nobody answered is a decision you made alone.
+
+Put the options in the call, one per option, each with a short explanation and the recommended one first. Keep the same shape the chat format uses:
+
+---
+**Question Title** (single choice / multi choice)
+
+1. **Option A (Recommended)** — short explanation
+2. **Option B** — short explanation
+3. **Option C** — short explanation
+---
+
+Rules: ONE question per call. Max 4 questions before acting on the answers. If the call fails or the tool is unavailable, fall back to writing the block above in chat and STOP your turn there.`
+    : `R2: Every user decision asked directly in chat. MANDATORY FORMAT — follow this template exactly:
 
 ---
 **Question Title** (single choice / multi choice)
@@ -46,7 +60,7 @@ const GLOBAL_RULES = {
 > Reply with the number (e.g. \`1\`) or type your own answer.
 ---
 
-Rules: ONE question per block. Separate blocks with horizontal rule (---). Max 4 questions per message. NEVER mix multiple questions in a single paragraph. NEVER use nested lists. ALWAYS end each block with the reply instruction line.`,
+Rules: ONE question per block. Separate blocks with horizontal rule (---). Max 4 questions per message. NEVER mix multiple questions in a single paragraph. NEVER use nested lists. ALWAYS end each block with the reply instruction line. After asking, STOP your turn and wait — continuing past an unanswered question is deciding it yourself.`,
   R4_TIMING: {
     0: "R4: Populate specs/ — refs, domain, competitors.",
     1: "R4: Populate specs/ — technical, models, examples.",
@@ -969,12 +983,29 @@ const FULL_GUIDANCE: Record<number, string> = {
  * Returns the FULL guidance for the phase (for MCP tool get_phase_guidance).
  * Includes: global rules + triggers + anti-patterns + phase instructions.
  */
-export function getFullGuidance(phase: number): string {
+/**
+ * Options that depend on the host rather than the phase.
+ *
+ * `askUserTool` names a tool this host exposes for putting a question to the
+ * user — GLM's harness has one; Qwen's does not, which is why the methodology's
+ * questions are written as chat blocks by default. Where such a tool exists it is
+ * strictly better: a tool call yields the turn, while a question written as prose
+ * only stops the model if the model chooses to stop.
+ *
+ * Configured, never inferred from the model name: the tool comes from the harness
+ * and not from the weights, and a stale name list would have the model calling
+ * something that is not there.
+ */
+export interface GuidanceOptions {
+  askUserTool?: string;
+}
+
+export function getFullGuidance(phase: number, opts: GuidanceOptions = {}): string {
   const parts: string[] = [];
 
   // Global rules always applicable
   parts.push("## ACTIVE GLOBAL RULES");
-  parts.push(GLOBAL_RULES.R2); // R2 always active
+  parts.push(GLOBAL_RULES.R2(opts.askUserTool)); // R2 always active
   parts.push(GLOBAL_RULES.R5); // R5 always active — mandatory display
   parts.push(GLOBAL_RULES.R6); // R6 always active — one request cannot outrun the host's deadline
 
@@ -1023,7 +1054,7 @@ export function getCompleteGuidance(): string {
 
   parts.push("## ACTIVE GLOBAL RULES");
   parts.push(GLOBAL_RULES.R1);
-  parts.push(GLOBAL_RULES.R2);
+  parts.push(GLOBAL_RULES.R2());
   parts.push(GLOBAL_RULES.R5);
   parts.push("R4 (per-phase timing):");
   for (const [p, r4] of Object.entries(GLOBAL_RULES.R4_TIMING)) {

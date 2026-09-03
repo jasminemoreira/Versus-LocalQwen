@@ -132,6 +132,7 @@ function ensureVscodeMcpJson(workspace: string): boolean {
       VERSUS_OLLAMA_URL: "${config:versus-localqwen.ollamaUrl}",
       VERSUS_OLLAMA_MODEL: "${config:versus-localqwen.model}",
       VERSUS_GENERATION_RESERVE: "${config:versus-localqwen.generationReserve}",
+      VERSUS_ASK_USER_TOOL: "${config:versus-localqwen.askUserTool}",
     },
   };
 

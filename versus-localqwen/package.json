@@ -2,7 +2,7 @@
   "name": "versus-localqwen",
   "displayName": "Versus for Local Qwen",
   "description": "IACDM orchestrator for local models served by Ollama in VS Code Agent Mode. Adds a context-budget guard for architectures without KV cache shifting, where overflow kills generation silently.",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "publisher": "JasmineMoreira",
   "author": "Jasmine Moreira",
   "license": "MIT",
@@ -87,6 +87,11 @@
     "configuration": {
       "title": "Versus for Local Qwen",
       "properties": {
+        "versus-localqwen.askUserTool": {
+          "type": "string",
+          "default": "",
+          "description": "Name of a tool this host exposes for asking the user a question and waiting for the answer — GLM's harness provides one, Qwen's does not. When set, the methodology tells the model to put every user decision through that tool instead of writing it as a chat block: a tool call yields the turn, while a question written as prose only stops the model if it chooses to stop. Leave empty when the host has no such tool. Do not set a name that does not exist — the model would call it and fail mid-phase."
+        },
         "versus-localqwen.kvCacheType": {
           "type": "string",
           "enum": ["f16", "q8_0", "q4_0"],
