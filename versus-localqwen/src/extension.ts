@@ -9,6 +9,7 @@ import { ContextStatus } from "./views/context-status";
 import { reportSiblings } from "./views/sibling-check";
 import { ensureEstimatorClamp } from "./views/estimator-patch-ui";
 import { ensureSpecsReadme, AGENT_INSTRUCTIONS_CONTENT } from "./setup";
+import { rankAskTools } from "./ask-tool";
 import { advertisedBudget, effectiveWindow, modelInfo } from "./ollama/client";
 import { alignModelContext } from "./ollama/align";
 import { promptForNumCtx } from "./ollama/align-ui";
@@ -275,6 +276,98 @@ export function activate(context: vscode.ExtensionContext) {
     // Auto-compaction is the single largest lever on a small window: the host
     // summarises before the window is full, and on a 64k model that headroom is
     // most of the session.
+    // Choosing the ask-user tool from a list of tools that exist, rather than
+    // from memory. The failure this avoids is specific: a name that is not
+    // registered anywhere makes the model call something absent, mid-phase.
+    context.subscriptions.push(
+      vscode.commands.registerCommand("versus-localqwen.setAskUserTool", async () => {
+        const cfg = vscode.workspace.getConfiguration("versus-localqwen");
+        const current = cfg.get<string>("askUserTool", "");
+        const registered = vscode.lm?.tools ?? [];
+
+        // Tools that plausibly ask a person come first; the rest stay reachable
+        // through the filter box.
+        const ranked = rankAskTools(registered);
+
+        type Item = vscode.QuickPickItem & { value?: string; manual?: boolean };
+        const items: Item[] = [
+          {
+            label: "$(comment-discussion) None — ask in chat",
+            description: current === "" ? "current" : undefined,
+            detail:
+              "The methodology writes each question as a chat block and stops. Right where the host " +
+              "has no tool for it — but a question written as prose only stops a model that chooses to stop.",
+            value: "",
+          },
+        ];
+        if (ranked.length > 0) {
+          items.push({ label: "Registered tools", kind: vscode.QuickPickItemKind.Separator });
+          for (const t of ranked) {
+            items.push({
+              label: `$(tools) ${t.name}`,
+              description: t.name === current ? "current" : undefined,
+              detail: t.description?.slice(0, 160),
+              value: t.name,
+            });
+          }
+        }
+        items.push(
+          { label: "", kind: vscode.QuickPickItemKind.Separator },
+          {
+            label: "$(edit) Enter a name manually…",
+            detail:
+              registered.length === 0
+                ? "No tools are registered in this window — the chat extension may not have activated yet."
+                : "For a tool this window cannot see, such as one the model's own harness provides.",
+            manual: true,
+          }
+        );
+
+        const picked = await vscode.window.showQuickPick(items, {
+          title: "Which tool should Versus use to ask the user a question?",
+          placeHolder:
+            current === "" ? "Currently: none — questions are asked in chat" : `Currently: ${current}`,
+          matchOnDetail: true,
+        });
+        if (!picked) return;
+
+        let chosen = picked.value;
+        if (picked.manual) {
+          const typed = await vscode.window.showInputBox({
+            title: "Ask-user tool",
+            prompt: "Exact tool name. Leave empty to ask questions in chat instead.",
+            value: current,
+          });
+          if (typed === undefined) return;
+          chosen = typed.trim();
+        }
+        if (chosen === undefined || chosen === current) return;
+
+        // Workspace when there is one: the same machine runs different models in
+        // different windows, and the tool belongs to whichever harness this
+        // project talks to.
+        const target = vscode.workspace.workspaceFolders?.length
+          ? vscode.ConfigurationTarget.Workspace
+          : vscode.ConfigurationTarget.Global;
+        await cfg.update("askUserTool", chosen, target);
+        const scope = target === vscode.ConfigurationTarget.Workspace ? "this workspace" : "globally";
+        log(`setAskUserTool: ${chosen || "(none)"} for ${scope}`);
+
+        // The MCP server reads VERSUS_ASK_USER_TOOL once, when VS Code spawns it,
+        // so the setting only reaches the guidance after a restart.
+        const next = await vscode.window.showInformationMessage(
+          chosen
+            ? `Versus will ask through '${chosen}' (${scope}).`
+            : `Versus will ask in chat (${scope}).`,
+          { modal: false, detail: "" },
+          "Reload Window"
+        );
+        if (next === "Reload Window") {
+          vscode.commands.executeCommand("workbench.action.reloadWindow");
+        }
+      })
+    );
+
     context.subscriptions.push(
       vscode.commands.registerCommand("versus-localqwen.setCompactionThreshold", async () => {
         const r = await contextStatus!.refresh();

@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.11.3] - 2026-09-02
+
+### Added
+
+- **`Versus LocalQwen: Choose Ask-User Tool` in the command palette.** Setting
+  `askUserTool` meant editing settings.json by hand and typing a tool name from
+  memory — and a name that is registered nowhere makes the model call something
+  absent, mid-phase. The picker lists the tools the window actually has, from
+  `vscode.lm.tools`, with the plausible ones first: anything whose name or
+  description mentions asking, prompting, confirming, input, a user or a choice.
+
+  Nothing is filtered out, only reordered. A harness may name its tool something
+  the pattern never anticipated, and hiding it would send the user back to typing
+  from memory — the mistake the picker exists to prevent. "None — ask in chat"
+  is always the first entry, and manual entry stays available for a tool this
+  window cannot see.
+
+### Notes
+
+- Written to Workspace settings when a folder is open, Global otherwise: the same
+  machine runs different models in different windows, and the tool belongs to
+  whichever harness that project talks to. The confirmation says which scope it
+  used.
+- The MCP server reads `VERSUS_ASK_USER_TOOL` once, when VS Code spawns it, so the
+  choice only reaches the guidance after a restart. The confirmation offers
+  Reload Window rather than leaving that to be discovered.
+- The ranking is a pure function in `src/ask-tool.ts`, apart from the command, so
+  the part worth getting right — which entries reach the top of a list that can
+  hold dozens — is tested without an extension host.
+
 ## [0.11.2] - 2026-09-02
 
 ### Fixed

@@ -28,6 +28,7 @@ import {
   resolveBudgetFloor,
 } from "../ollama/client";
 import { handleGetPhaseGuidance } from "../mcp/tools/guidance-tools";
+import { rankAskTools } from "../ask-tool";
 import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
 import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
 import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
@@ -2164,6 +2165,27 @@ test("R6 does not weaken R5 — complete, in blocks", () => {
   assert.ok(/never summarized, never truncated/.test(g));
   // And the phase that actually crosses the budget says so where it happens.
   assert.ok(g.includes("findings 1-30 of 47"), "Phase 2 shows how to announce a split");
+});
+
+test("the ask-user picker puts the plausible tools first", () => {
+  const ranked = rankAskTools([
+    { name: "read_file", description: "Reads a file from disk" },
+    { name: "ask_user", description: "Puts a question to the user and waits" },
+    { name: "run_terminal", description: "Runs a shell command" },
+    { name: "confirm_action", description: "Requests approval before acting" },
+  ]);
+  assert.deepStrictEqual(ranked.slice(0, 2).map((t) => t.name), ["ask_user", "confirm_action"]);
+});
+
+test("no tool is hidden from the picker", () => {
+  // A harness may name its tool something the pattern never anticipated. Hiding
+  // it would send the user back to typing a name from memory, which is the
+  // mistake the picker exists to prevent.
+  const tools = [{ name: "zzz_unlikely" }, { name: "ask_user" }, { name: "aaa_unlikely" }];
+  const ranked = rankAskTools(tools);
+  assert.strictEqual(ranked.length, 3);
+  assert.strictEqual(ranked[0].name, "ask_user");
+  assert.deepStrictEqual(ranked.slice(1).map((t) => t.name), ["aaa_unlikely", "zzz_unlikely"]);
 });
 
 test("without an ask-user tool the questions stay chat blocks", () => {
