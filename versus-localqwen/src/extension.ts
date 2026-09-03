@@ -98,7 +98,9 @@ async function applyAskUserTool(cfg: vscode.WorkspaceConfiguration, chosen: stri
   log(`setAskUserTool: ${chosen || "(none)"} for ${scope}`);
 
   const next = await vscode.window.showInformationMessage(
-    chosen ? `Versus will ask through '${chosen}' (${scope}).` : `Versus will ask in chat (${scope}).`,
+    chosen
+      ? `Versus will ask through '${chosen}' (${scope}).`
+      : `Versus will ask through MCP elicitation, the default (${scope}).`,
     "Reload Window"
   );
   if (next === "Reload Window") {
@@ -328,10 +330,10 @@ export function activate(context: vscode.ExtensionContext) {
                 pick: best.name,
               },
               {
-                label: "$(comment-discussion) No — ask in chat",
+                label: "$(check) No — keep the default (MCP elicitation)",
                 detail:
-                  "Each question is written as a chat block and the turn stops. Right where the " +
-                  "host has no tool for it, but prose only stops a model that chooses to stop.",
+                  "Versus asks through the protocol: the client shows a dialog and the answer comes " +
+                  "from you. Where the client cannot, it falls back to a chat block on its own.",
                 pick: "",
               },
               {
@@ -355,11 +357,11 @@ export function activate(context: vscode.ExtensionContext) {
         type Item = vscode.QuickPickItem & { value?: string; manual?: boolean };
         const items: Item[] = [
           {
-            label: "$(comment-discussion) None — ask in chat",
+            label: "$(check) Default — MCP elicitation",
             description: current === "" ? "current" : undefined,
             detail:
-              "The methodology writes each question as a chat block and stops. Right where the host " +
-              "has no tool for it — but a question written as prose only stops a model that chooses to stop.",
+              "Versus asks through the protocol: the client shows a dialog and the answer comes from " +
+              "you, not from the model. Falls back to a chat block where the client cannot show one.",
             value: "",
           },
         ];
@@ -410,8 +412,8 @@ export function activate(context: vscode.ExtensionContext) {
 
         const picked = await vscode.window.showQuickPick(items, {
           title:
-            "Which tool should Versus use to ask the user a question? " +
-            "(type to filter — try 'ask')",
+            "Override the ask-user tool? The default (MCP elicitation) needs no setting " +
+            "— type to filter",
           placeHolder:
             current === "" ? "Currently: none — questions are asked in chat" : `Currently: ${current}`,
           matchOnDetail: true,

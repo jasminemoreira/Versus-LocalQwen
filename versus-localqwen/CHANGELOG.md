@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.12.1] - 2026-09-03
+
+### Changed
+
+- **The ask-user command reads as the override it became.** Since 0.12.0 Versus
+  asks through MCP elicitation and needs no configuration, but the palette entry
+  still sat among the ordinary setup commands as though it were a step. It is now
+  "Override Ask-User Tool (advanced)", the picker opens by saying the default
+  needs no setting, and clearing the override reads as "keep the default (MCP
+  elicitation)" rather than "ask in chat" — which is what it used to mean and
+  would now be a downgrade.
+- The setting's own description says the same, so it is not discovered as a
+  required step from the settings UI either.
+
+### Notes
+
+- The command appears in the palette with or without a project open: commands are
+  contributed by the extension, not by the workspace. Deleting a project does not
+  remove one, and nothing about it is per-project except the value it writes.
+
 ## [0.12.0] - 2026-09-03
 
 Minor bump: a new tool, and the ask-user question stops needing configuration.
