@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.13.0] - 2026-09-03
+
+Minor bump: the instruction file stops fixing a format, and starts being kept up
+to date.
+
+### Fixed
+
+- **The project's instruction file contradicted the guidance it was served.**
+  `.github/copilot-instructions.md` spelled out the chat-block question format
+  verbatim, down to "Reply with the number (e.g. `1`)". Since 0.12.0 the guidance
+  tells the model to call `ask_user` where the host can show a dialog — two
+  instructions, and the file is the one loaded into every request. The model
+  followed the file, which is the reasonable thing to do.
+
+  Traced by elimination that actually eliminated: with the real client
+  capabilities, the project's own server serves R2 saying "call `ask_user`" and
+  the string "Reply with the number" appears **nowhere** in the phase 0 guidance —
+  yet the model wrote it verbatim. It came from the file.
+
+  The file now delegates: "HOW to ask is decided at run time, and rule R2 in the
+  phase guidance says which way." It cannot know at creation time whether the host
+  will offer elicitation, so it no longer pretends to.
+
+- **The instruction file was written once and never refreshed.**
+  `if (content.includes("versus")) return` meant every project kept the text it
+  was born with — the same defect shape as the frozen server binary and the
+  `mcp.json` env missing a variable. It is now fenced with
+  `<!-- versus:begin -->` / `<!-- versus:end -->` and refreshed on activation. A
+  legacy block, written before the fences, is replaced from its heading onwards;
+  anything the user wrote before or after is left alone, which is under test.
+
+### Changed
+
+- Both writers — the extension's and the MCP server's — call one
+  `writeAgentInstructions`. The comment claimed they shared content "so the two
+  can never disagree"; they duplicated the logic, and only the content was shared.
+
+### Notes
+
+- Two of my conclusions this round were wrong and were corrected by measurement,
+  not by argument: that VS Code does not offer elicitation (the capability log
+  shows `elicitation, roots, sampling, tasks`), and that the model was ignoring
+  the instruction to stop (it does stop — it just used the format the file gave
+  it).
+
 ## [0.12.3] - 2026-09-03
 
 ### Added

@@ -70,25 +70,19 @@ This project uses the Versus methodology orchestrated via MCP server \`versus-lo
 
 ### User interaction:
 
-Ask the user directly in chat. Follow this EXACT format for every question:
+Every decision the methodology says belongs to the user goes to the user — never
+decide one yourself, and never write a question and keep going.
 
-\`\`\`
----
-**Question Title** (single choice / multi choice)
+**HOW to ask is decided at run time, and rule R2 in the phase guidance says which
+way. Follow R2, not a format remembered from anywhere else.** Where the host can
+show a dialog, R2 names the tool to call and a chat block would be a downgrade;
+where it cannot, R2 gives the block format to write instead. This file is written
+once, when the project is created, and cannot know which of the two applies —
+which is why it does not spell out a format.
 
-1. **Option A (Recommended)** — short explanation
-2. **Option B** — short explanation
-3. **Option C** — short explanation
-
-> Reply with the number (e.g. \`1\`) or type your own answer.
----
-\`\`\`
-
-Rules:
-- ONE question per block, separated by horizontal rule (\`---\`)
-- Max 4 questions per message
-- NEVER mix multiple questions in a single paragraph or nested list
-- ALWAYS end each block with the reply instruction line
+Whichever way R2 names: one question at a time, options with the recommended one
+first, and STOP after asking. Continuing past an unanswered question is deciding
+it alone.
 - Mark recommended option with **(Recommended)**
 - Options must be contextualized to the project — never generic
 - After the response, record with \`record_decision\`
@@ -123,3 +117,50 @@ is almost always overflow, not confusion. Treat it as a failure, never as succes
 - When a turn is cut short, do NOT retry the same scope. Report the truncation,
   then propose a smaller unit.
 `;
+
+/** Fences the block this extension owns, so it can be refreshed without touching the rest. */
+export const INSTRUCTIONS_BEGIN = "<!-- versus:begin — managed by the Versus extension, edits here are overwritten -->";
+export const INSTRUCTIONS_END = "<!-- versus:end -->";
+
+/** The first line of the block, used to find a legacy copy written before the fences. */
+const LEGACY_ANCHOR = "## Iterative Convergence Methodology (Versus)";
+
+/**
+ * Writes or refreshes the Versus block in .github/copilot-instructions.md.
+ *
+ * It used to be written once and never again — `if (content.includes("versus")) return`
+ * — so a project kept whatever text it was created with. That is how a project
+ * ended up being told to write questions as chat blocks while the phase guidance
+ * told it to call a tool: two instructions, and the file is the one always in
+ * context. Anything outside the fences is left alone, including a legacy block's
+ * preceding content.
+ */
+export function writeAgentInstructions(workspacePath: string): "created" | "updated" | "unchanged" {
+  const githubDir = path.join(workspacePath, ".github");
+  const file = path.join(githubDir, "copilot-instructions.md");
+  const block = `${INSTRUCTIONS_BEGIN}\n${AGENT_INSTRUCTIONS_CONTENT}\n${INSTRUCTIONS_END}\n`;
+
+  if (!fs.existsSync(file)) {
+    fs.mkdirSync(githubDir, { recursive: true });
+    fs.writeFileSync(file, block, "utf-8");
+    return "created";
+  }
+
+  const existing = fs.readFileSync(file, "utf-8");
+  const start = existing.indexOf(INSTRUCTIONS_BEGIN);
+  const end = existing.indexOf(INSTRUCTIONS_END);
+
+  let next: string;
+  if (start !== -1 && end > start) {
+    next = existing.slice(0, start) + block + existing.slice(end + INSTRUCTIONS_END.length + 1);
+  } else {
+    // A block written before the fences existed. Our writers always appended it
+    // last, so everything from its heading onwards is ours to replace.
+    const legacy = existing.indexOf(LEGACY_ANCHOR);
+    next = legacy !== -1 ? existing.slice(0, legacy) + block : `${existing.trimEnd()}\n\n${block}`;
+  }
+
+  if (next === existing) return "unchanged";
+  fs.writeFileSync(file, next, "utf-8");
+  return "updated";
+}

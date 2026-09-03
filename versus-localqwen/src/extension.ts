@@ -8,7 +8,7 @@ import { SidebarProvider } from "./views/sidebar";
 import { ContextStatus } from "./views/context-status";
 import { reportSiblings } from "./views/sibling-check";
 import { ensureEstimatorClamp } from "./views/estimator-patch-ui";
-import { ensureSpecsReadme, AGENT_INSTRUCTIONS_CONTENT } from "./setup";
+import { ensureSpecsReadme, writeAgentInstructions } from "./setup";
 import { bestAskTool, looksLikeAskTool, rankAskTools } from "./ask-tool";
 import { advertisedBudget, effectiveWindow, modelInfo } from "./ollama/client";
 import { alignModelContext } from "./ollama/align";
@@ -589,6 +589,16 @@ export function activate(context: vscode.ExtensionContext) {
       log("server.js updated.");
       generateMcpConfig(workspacePath);
       log("MCP config updated.");
+    // Refresh the instruction block too: it is loaded into every chat request,
+    // and a project created under an older build kept text that now contradicts
+    // the guidance it is served.
+    if (vscode.workspace.workspaceFolders?.length) {
+      try {
+        log(`copilot-instructions.md ${writeAgentInstructions(workspacePath)}.`);
+      } catch (err) {
+        log(`copilot-instructions.md refresh failed: ${err}`);
+      }
+    }
       reportSiblings(
         workspacePath,
         path.join(workspacePath, ".versus", BUNDLE_DIR, "server.js"),
@@ -711,24 +721,8 @@ function generateVscodeSettings(workspacePath: string) {
  * so the two can never disagree.
  */
 function generateAgentInstructions(workspacePath: string) {
-  const githubDir = path.join(workspacePath, ".github");
-  const instructionsPath = path.join(githubDir, "copilot-instructions.md");
-
-  if (fs.existsSync(instructionsPath)) {
-    const content = fs.readFileSync(instructionsPath, "utf-8");
-    if (content.includes("versus")) return;
-  }
-
-  if (!fs.existsSync(githubDir)) {
-    fs.mkdirSync(githubDir, { recursive: true });
-  }
-
-  if (fs.existsSync(instructionsPath)) {
-    const existing = fs.readFileSync(instructionsPath, "utf-8");
-    fs.writeFileSync(instructionsPath, existing + "\n" + AGENT_INSTRUCTIONS_CONTENT, "utf-8");
-  } else {
-    fs.writeFileSync(instructionsPath, AGENT_INSTRUCTIONS_CONTENT, "utf-8");
-  }
+  const outcome = writeAgentInstructions(workspacePath);
+  log(`copilot-instructions.md ${outcome}.`);
 }
 
 function readJsonSafe(filePath: string, fallback: Record<string, any>): Record<string, any> {

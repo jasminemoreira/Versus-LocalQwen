@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { StateEngine } from "../../state/engine";
-import { ensureSpecsReadme, AGENT_INSTRUCTIONS_CONTENT } from "../../setup";
+import { ensureSpecsReadme, writeAgentInstructions } from "../../setup";
 
 
 const SPECS_SUBDIRS = [
@@ -231,19 +231,7 @@ function ensureAgentInstructions(workspace: string): boolean {
     }
   }
 
-  if (!fs.existsSync(githubDir)) {
-    fs.mkdirSync(githubDir, { recursive: true });
-  }
-
-  const instructions = AGENT_INSTRUCTIONS_CONTENT;
-
-  // If content already exists, append; otherwise, create
-  if (fs.existsSync(instructionsPath)) {
-    const existing = fs.readFileSync(instructionsPath, "utf-8");
-    fs.writeFileSync(instructionsPath, existing + "\n" + instructions, "utf-8");
-  } else {
-    fs.writeFileSync(instructionsPath, instructions, "utf-8");
-  }
+  writeAgentInstructions(workspace);
 
   return true;
 }

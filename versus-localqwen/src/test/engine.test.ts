@@ -28,6 +28,11 @@ import {
   resolveBudgetFloor,
 } from "../ollama/client";
 import { handleGetPhaseGuidance, resolveAskUserTool } from "../mcp/tools/guidance-tools";
+import {
+  AGENT_INSTRUCTIONS_CONTENT,
+  INSTRUCTIONS_BEGIN,
+  writeAgentInstructions,
+} from "../setup";
 import { ELICITATION_UNAVAILABLE, handleAskUser } from "../mcp/tools/ask-tools";
 import { askToolScore, bestAskTool, looksLikeAskTool, rankAskTools } from "../ask-tool";
 import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
@@ -2588,6 +2593,59 @@ test("R2 points at our own tool when the client can show a dialog", () => {
   } finally {
     if (before === undefined) delete process.env.VERSUS_ASK_USER_TOOL;
     else process.env.VERSUS_ASK_USER_TOOL = before;
+  }
+});
+
+
+console.log("\n=== Agent Instructions Tests ===\n");
+
+function instructionsFile(tmp: string): string {
+  return path.join(tmp, ".github", "copilot-instructions.md");
+}
+
+test("the instruction file no longer fixes a question format", () => {
+  // It used to spell out the chat block, verbatim, including "Reply with the
+  // number". The guidance meanwhile told the model to call a tool — two
+  // instructions, and the file is the one always in context. The model followed
+  // the file.
+  assert.ok(!AGENT_INSTRUCTIONS_CONTENT.includes("Reply with the number"));
+  assert.ok(/Follow R2, not a format/.test(AGENT_INSTRUCTIONS_CONTENT));
+  assert.ok(AGENT_INSTRUCTIONS_CONTENT.includes("STOP after asking"));
+});
+
+test("a legacy block is replaced and the user's own text survives", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "versus-instr-"));
+  try {
+    const mine = "# Team rules\nAlways use tabs.\n\n";
+    fs.mkdirSync(path.join(tmp, ".github"), { recursive: true });
+    fs.writeFileSync(
+      instructionsFile(tmp),
+      mine + "## Iterative Convergence Methodology (Versus)\n\nold text\n> Reply with the number\n"
+    );
+
+    assert.strictEqual(writeAgentInstructions(tmp), "updated");
+    const after = fs.readFileSync(instructionsFile(tmp), "utf-8");
+    assert.ok(after.startsWith(mine), "content written by the user is not ours to remove");
+    assert.ok(!after.includes("Reply with the number"), "the contradicting text must go");
+    assert.ok(after.includes(INSTRUCTIONS_BEGIN), "and the block is fenced from now on");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("refreshing is idempotent, and only ours is touched", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "versus-instr-"));
+  try {
+    assert.strictEqual(writeAgentInstructions(tmp), "created");
+    assert.strictEqual(writeAgentInstructions(tmp), "unchanged");
+
+    // Something added after our block stays after it.
+    const trailing = "\n## My own section\nkeep me\n";
+    fs.appendFileSync(instructionsFile(tmp), trailing);
+    assert.strictEqual(writeAgentInstructions(tmp), "unchanged", "nothing of ours changed");
+    assert.ok(fs.readFileSync(instructionsFile(tmp), "utf-8").includes("keep me"));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
