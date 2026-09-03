@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.3] - 2026-09-03
+
+### Added
+
+- **The negotiated capability is written to `.versus/mcp-client.log` as well as to
+  stderr.** The stderr line lands in the MCP server's output channel, three steps
+  away and easy to confuse with the extension's own — the first attempt to read it
+  produced the wrong channel, and the second produced the right one from a run
+  that predated the logging. The file is one line, rewritten at every start, in
+  the directory the project already owns:
+
+  ```
+  2026-09-03T13:00:32.327Z vscode 1.120
+  offers: elicitation, roots
+  elicitation available — ask_user will open a dialog the model cannot answer
+  ```
+
+  It answers the question that recurs every time a question arrives as prose:
+  whether the host declined to show a dialog, or the model ignored its
+  instructions. From the chat those look identical.
+
 ## [0.12.2] - 2026-09-03
 
 ### Added
