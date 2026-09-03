@@ -38,7 +38,7 @@ async function main() {
   const server = new Server(
     {
       name: "versus-localqwen",
-      version: "0.12.1",
+      version: "0.12.2",
     },
     {
       capabilities: {
@@ -97,6 +97,29 @@ async function main() {
       };
     }
   });
+
+  /**
+   * What the client offered, on stderr so it lands in the MCP output channel.
+   *
+   * Whether questions reach a person through a dialog or through a chat block is
+   * decided entirely by a capability negotiated here, and there was no way to see
+   * which had happened — the symptom (a question written as prose) looks the same
+   * as a model ignoring its instructions. One line ends that guessing.
+   */
+  server.oninitialized = () => {
+    const caps = server.getClientCapabilities() ?? {};
+    const info = server.getClientVersion();
+    const offered = Object.keys(caps).sort().join(", ") || "(none)";
+    console.error(
+      `[versus] client ${info?.name ?? "unknown"} ${info?.version ?? ""} offers: ${offered}`
+    );
+    console.error(
+      caps.elicitation
+        ? "[versus] elicitation available — ask_user will open a dialog the model cannot answer"
+        : "[versus] elicitation NOT offered by this client — ask_user falls back to a chat block, " +
+          "which stops the model only if it chooses to stop"
+    );
+  };
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

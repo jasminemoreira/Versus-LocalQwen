@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.12.2] - 2026-09-03
+
+### Added
+
+- **The server reports what the client offered, on stderr.** Whether a question
+  reaches a person as a dialog or as a chat block is decided by a capability
+  negotiated at initialize, and there was no way to see which had happened — a
+  question written as prose looks identical whether the host declined elicitation
+  or the model ignored its instructions. Two lines in the MCP output channel now
+  say which:
+
+  ```
+  [versus] client <name> <version> offers: elicitation, roots
+  [versus] elicitation available — ask_user will open a dialog the model cannot answer
+  ```
+
+  or, when it is not offered, that `ask_user` falls back to a chat block, "which
+  stops the model only if it chooses to stop".
+
+### Notes
+
+- Verified end to end against the binary deployed in a real project: with a client
+  declaring `elicitation`, R2 comes out pointing at the tool, `ask_user` issues the
+  `elicitation/create` request with the options as an enum, and the reply returns
+  as `answered`. Our side of this works.
+- So when the questions still arrive as chat blocks, the negotiation is where to
+  look — not the tool. The process running in that window was confirmed to be the
+  current binary, started after the deploy, which rules out staleness.
+
 ## [0.12.1] - 2026-09-03
 
 ### Changed
