@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.2] - 2026-09-05
+
+### Fixed
+
+- **Every `ask_user` dialog was a two-page form.** The client renders one form
+  property per step, so the optional "Anything to add" field turned each question
+  into a "2/2" wizard to click through — most of what made a question feel heavy.
+  The schema now carries a single property.
+
+  The escape from a closed list moved into the list: a final "Other — let me
+  answer in my own words" entry. Picking it returns `open-answer-requested` and
+  tells the model to ask again with no options, so a free-text field costs a round
+  trip only when someone wants one, instead of a second page on every question.
+  Nothing is reported as the user's answer in that case — the model is told not to
+  guess what they meant.
+
 ## [0.13.1] - 2026-09-03
 
 Patch: one timed-out `ask_user` no longer sends the model to chat for the rest of

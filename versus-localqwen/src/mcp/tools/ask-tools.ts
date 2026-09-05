@@ -59,6 +59,9 @@ export const askUserTool: Tool = {
 /** The literal a caller can look for to tell "the user said no" from "the host cannot ask". */
 export const ELICITATION_UNAVAILABLE = "elicitation-unavailable";
 
+/** The way out of a closed list, offered as one of its entries rather than a second field. */
+export const OTHER_OPTION = "Other — let me answer in my own words";
+
 export async function handleAskUser(
   elicitor: Elicitor,
   args: { question?: string; options?: unknown; context?: string }
@@ -86,13 +89,17 @@ export async function handleAskUser(
   }
 
   const message = [args.context?.trim(), question].filter(Boolean).join("\n\n");
+  // ONE property, deliberately. The client renders a form property per step, so
+  // a second field — a notes box, however optional — turns every question into a
+  // two-page wizard the user has to click through. The escape from a closed list
+  // is an entry IN the list instead, which costs a round trip only when taken.
   const answer =
     options.length > 0
       ? {
           type: "string" as const,
           title: "Your choice",
-          description: "Pick one, or use 'Other' to answer in your own words.",
-          enum: options,
+          description: `Pick one, or '${OTHER_OPTION}' to answer in your own words.`,
+          enum: [...options, OTHER_OPTION],
         }
       : { type: "string" as const, title: "Your answer" };
 
@@ -100,12 +107,7 @@ export async function handleAskUser(
     message,
     requestedSchema: {
       type: "object",
-      properties: {
-        answer,
-        // Always offered: a fixed list of options is the methodology's format,
-        // not a claim that the list is exhaustive.
-        notes: { type: "string", title: "Anything to add (optional)" },
-      },
+      properties: { answer },
       required: ["answer"],
     },
   });
@@ -123,11 +125,22 @@ export async function handleAskUser(
   }
 
   const content = result.content ?? {};
+  const given = String(content.answer ?? "").trim();
+
+  if (given === OTHER_OPTION) {
+    return JSON.stringify({
+      status: "open-answer-requested",
+      question,
+      instruction:
+        "The user wants to answer in their own words. Call ask_user again with the same question " +
+        "and NO options, so they get a free-text field. Do not guess what they meant.",
+    });
+  }
+
   return JSON.stringify({
     status: "answered",
     question,
-    answer: String(content.answer ?? "").trim(),
-    notes: content.notes ? String(content.notes).trim() : undefined,
+    answer: given,
     nextStep:
       "Record it with record_decision so it survives this session, then act on it. The answer " +
       "came from the user — do not restate it as a question.",

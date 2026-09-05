@@ -33,7 +33,7 @@ import {
   INSTRUCTIONS_BEGIN,
   writeAgentInstructions,
 } from "../setup";
-import { ELICITATION_UNAVAILABLE, handleAskUser } from "../mcp/tools/ask-tools";
+import { ELICITATION_UNAVAILABLE, OTHER_OPTION, handleAskUser } from "../mcp/tools/ask-tools";
 import { askToolScore, bestAskTool, looksLikeAskTool, rankAskTools } from "../ask-tool";
 import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
 import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
@@ -2545,13 +2545,34 @@ asyncTest("the answer comes from the user, not from the model", async () => {
   }));
   assert.strictEqual(out.status, "answered");
   assert.strictEqual(out.answer, "MVP first, then iterate");
-  // The options reach the dialog as a closed set the person picks from.
+  // The options reach the dialog as a closed set, plus the way out of it.
   assert.deepStrictEqual(e.seen[0].requestedSchema.properties.answer.enum, [
     "Complete product (recommended)",
     "MVP first, then iterate",
     "Prototype",
+    OTHER_OPTION,
   ]);
   assert.deepStrictEqual(e.seen[0].requestedSchema.required, ["answer"]);
+});
+
+asyncTest("the dialog asks one thing, so it is one page", async () => {
+  // The client renders a form property per step. A second field — a notes box,
+  // however optional — turned every question into a "2/2" wizard to click
+  // through, which is most of what makes a question feel heavy.
+  const e = elicitorThatAnswers({ answer: "yes" });
+  await handleAskUser(e, { question: "Ship it?", options: ["yes", "no"] });
+  assert.deepStrictEqual(Object.keys(e.seen[0].requestedSchema.properties), ["answer"]);
+});
+
+asyncTest("choosing to answer freely asks again without the list", async () => {
+  // The escape costs a round trip only when taken, instead of a second field on
+  // every question. What it must not do is let the model invent the answer.
+  const e = elicitorThatAnswers({ answer: OTHER_OPTION });
+  const out = JSON.parse(await handleAskUser(e, { question: "Which board?", options: ["English", "European"] }));
+  assert.strictEqual(out.status, "open-answer-requested");
+  assert.ok(!("answer" in out), "nothing may be reported as what they chose");
+  assert.ok(out.instruction.includes("NO options"));
+  assert.ok(out.instruction.includes("Do not guess"));
 });
 
 asyncTest("an open question needs no options", async () => {
