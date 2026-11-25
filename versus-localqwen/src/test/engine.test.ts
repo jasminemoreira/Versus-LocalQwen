@@ -38,6 +38,9 @@ import { askToolScore, bestAskTool, looksLikeAskTool, rankAskTools } from "../as
 import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
 import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
 import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
+import { handleMarkExitCriterion } from "../mcp/tools/record-tools";
+import { handleAdvancePhase } from "../mcp/tools/transition-tools";
+import { getSafeguardsForPhase, validateSafeguard } from "../rules/safeguards";
 import {
   CONDITIONAL_LENSES,
   CONDITIONAL_LENS_DEFS,
@@ -747,7 +750,7 @@ test("a recorded diagnosis clears the counter — the escape hatch is honoured",
 
     engine.recordDecision(5, "diagnosis", "to_dict() drops the tags relation on M:N");
     assert.ok(!engine.isLoopBlocked(), "a named cause must clear the block");
-    assert.strictEqual(engine.checkSafeguard("S6").status, "warning");
+    assert.strictEqual(engine.checkSafeguard("S6").status, "ok", "counter back to 0 — nothing left to warn about");
 
     // Aliases must work too, and an unrelated category must not clear it.
     engine.recordTestOutcome("pytest tests/", "fail");
@@ -2164,11 +2167,11 @@ test("a named diagnosis clears the violation in the panel too", () => {
 
     e.recordDecision(5, "diagnosis", "the fixture rebuilt state between runs");
 
-    // Back to `warning`, not `ok`: in Phase 5 S6 always carries the standing
-    // "implementation active" advisory. What matters is that it stops being a
+    // Back to `ok`: the diagnosis resets the counter to 0, and since 0.14.0 S6 only
+    // warns while failures are accumulating. What matters is that it stops being a
     // violation the moment the escape is taken — with nobody recording anything.
     const after = JSON.parse(handleGetPhaseState(e));
-    assert.strictEqual(after.safeguards.find((x: { id: string }) => x.id === "S6").status, "warning");
+    assert.strictEqual(after.safeguards.find((x: { id: string }) => x.id === "S6").status, "ok");
 
     // And the veto really is lifted: what blocks now is the unmet criteria, not S6.
     const blocked = e.advancePhase(6);
@@ -2671,6 +2674,55 @@ test("refreshing is idempotent, and only ours is touched", () => {
     assert.ok(fs.readFileSync(instructionsFile(tmp), "utf-8").includes("keep me"));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// --- 0.14.0: fixes from the first external study (ESJUD, Versus Claude 0.16.4, macOS/Xcode) ---
+// Ported from Versus Claude 0.17.0. Items 1-4 (shell classification, stop-verify, phase-gate)
+// have no counterpart here: this host has no hooks.
+
+console.log("\n=== External-study fixes (ESJUD) ===\n");
+
+test("mark_exit_criterion refuses a criterion of another phase", () => {
+  engine.initProject("Test", "Desc");
+  const future = JSON.parse(handleMarkExitCriterion(engine, { phase: 1, criterion: "user_confirmed", met: true }));
+  assert.strictEqual(future.success, false, "pre-stamping a future phase is what made G2/G3 land in the same second");
+  assert.ok(String(future.error).includes("current phase is 0"));
+  const crit = engine.getExitCriteriaWithDefs(0)[0].criterion;
+  const now = JSON.parse(handleMarkExitCriterion(engine, { phase: 0, criterion: crit, met: true }));
+  assert.strictEqual(now.success, true);
+  assert.ok(!engine.getPhaseState()!.exitCriteria.some((c) => c.phase === 1), "the refused mark left nothing behind");
+});
+
+test("advance_phase without target_phase says what to pass, never 'Phase undefined'", () => {
+  engine.initProject("Test", "Desc");
+  const r = JSON.parse(handleAdvancePhase(engine, {} as { target_phase: number }));
+  assert.strictEqual(r.success, false);
+  assert.ok(String(r.error).includes("requires target_phase") && String(r.error).includes("next sequential phase is 1"));
+  assert.ok(!String(r.error).includes("undefined"));
+});
+
+test("Phase 4 checks S1-S5, matching its 'Safeguards S1-S5 met' criterion", () => {
+  engine.initProject("Test", "Desc");
+  const st = { ...engine.getPhaseState()!, currentPhase: 4 };
+  const ids = (["S1", "S2", "S3", "S4", "S5"] as const).map((id) => validateSafeguard(id, st));
+  assert.ok(ids.every((r) => r.details.length > 0));
+  assert.strictEqual(ids[0].status, "warning", "S1 in Phase 4 is an active review of Phase 3");
+  assert.ok(ids[0].details.includes("Phase 4 review"));
+  assert.ok(ids[4].details.includes("Phase 4 review"));
+  assert.deepStrictEqual(getSafeguardsForPhase(4).map((s) => s.id), ["S1", "S2", "S3", "S4", "S5"]);
+});
+
+test("S6 is ok (not warning) at 0 undiagnosed failures, warning once they accumulate; S7 is behavioral", () => {
+  const { engine: e, tmp } = engineInPhase5();
+  try {
+    const st = () => e.getPhaseState()!;
+    assert.strictEqual(validateSafeguard("S6", st()).status, "ok", "'warning 0/3' all through Phases 5-6 carried no information");
+    e.recordTestOutcome("npm test", "fail");
+    assert.strictEqual(validateSafeguard("S6", st()).status, "warning");
+    assert.strictEqual(validateSafeguard("S7", st()).status, "ok");
+  } finally {
+    cleanTempWorkspace(tmp);
   }
 });
 

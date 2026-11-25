@@ -54,6 +54,21 @@ const PHASE_PAUSE_MESSAGES: Record<number, string> = {
 };
 
 export function handleAdvancePhase(engine: StateEngine, args: { target_phase: number }): string {
+  // The schema requires target_phase, but a call without it reached the engine and came back
+  // as "Phase undefined" (ESJUD study, Phase 7). Not defaulted to current+1: from Phase 3 the
+  // valid targets are 4 AND the 2↔3 loop, so the caller must say which.
+  if (typeof args.target_phase !== "number" || !Number.isInteger(args.target_phase)) {
+    const cur = engine.getPhaseState()?.currentPhase;
+    return JSON.stringify({
+      success: false,
+      error:
+        "advance_phase requires target_phase (an integer 0-7)." +
+        (typeof cur === "number"
+          ? ` Current phase is ${cur}; the next sequential phase is ${cur + 1}` +
+            (cur === 3 ? " (or 2, to loop back for another critique round)." : ".")
+          : ""),
+    });
+  }
   const result = engine.advancePhase(args.target_phase);
   if (result.ok) {
     const newState = engine.getPhaseState();

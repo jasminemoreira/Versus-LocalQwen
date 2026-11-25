@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.14.0] - 2026-11-25
+
+Port of Versus Claude 0.17.0: the fixes from the first external study of Versus
+(ESJUD, Zenodo 10.5281/zenodo.22664296 — Versus Claude 0.16.4 on macOS/Xcode). The
+evidence for each item is in the Versus Claude 0.17.0 changelog.
+
+### Fixed
+
+- **`mark_exit_criterion` accepted a criterion of any phase.** The study marked the
+  Phase 3 criteria while Versus still said Phase 2, so the G2 and G3 gates landed in
+  the same second. The tool now refuses a criterion of a phase other than the
+  current one, and says which to do: finish, advance, then mark (future phase), or
+  that the phase is already closed (past phase). The check lives in the handler,
+  not the engine, so direct engine calls are unaffected. No flow of this build
+  marks another phase's criterion on purpose (checked: `ask-tools` and the
+  bootstrap never call it).
+- **Phase 4 checked only S2 and S4, while its gate is "Safeguards S1-S5 met".**
+  S1, S3 and S5 now apply to Phase 4. S1 and S5 come back as an active review
+  (`warning`): confirm that the Phase 3 simplifications kept every feature, and
+  that the converged design is still within the Phase 0 scope.
+  `getSafeguardsForPhase(4)` is S1–S5.
+- **`advance_phase` without `target_phase` answered "Phase undefined".** It now
+  says the current phase and the next sequential one (from Phase 3, also the 2↔3
+  loop). It is deliberately not defaulted, because from Phase 3 the target is the
+  caller's choice.
+- **S6 was a permanent `warning` all through Phases 5–6**, even at 0/3 undiagnosed
+  failures, and S7 all through Phase 5, so the panel looked unhealthy with nothing
+  wrong. S6 now warns only once failures accumulate. Here its counter is fed by
+  `record_test_outcome`, which the model calls itself, so the rule is the same. S7
+  is a behavioral check (`ok`), like S2–S4.
+
+### Not ported
+
+- Items 1–4 of 0.17.0 (structural test-command parsing, non-npm runners,
+  `stop-verify` timeouts, the shell bypass of `phase-gate`) have nothing to land on
+  here. This host has no hooks: the model reports its own test runs, and there is
+  no write gate or Stop hook.
+- The `target_phase` hints (`_nextAction`, `readyToAdvanceHint`, the guidance's
+  call instructions) were already explicit in this build. `nextStep` still points
+  at `get_phase_guidance()`, which here returns the phase text on demand rather
+  than pointing at an injected copy.
+
+### Tests
+
+151 (+4 ported: mark, advance, S1–S5, S6/S7). Two existing assertions expected
+S6 to stay at `warning` after a diagnosis cleared the counter; they now expect
+`ok`, which is the point of the change.
+
 ## [0.13.2] - 2026-09-05
 
 ### Fixed
