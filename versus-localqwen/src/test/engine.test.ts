@@ -38,8 +38,12 @@ import { askToolScore, bestAskTool, looksLikeAskTool, rankAskTools } from "../as
 import { fitDecisions, handleGetPhaseState } from "../mcp/tools/state-tools";
 import { handleRecordTestOutcome } from "../mcp/tools/loop-tools";
 import { handleRecordActivatedLenses } from "../mcp/tools/lens-tools";
-import { handleMarkExitCriterion } from "../mcp/tools/record-tools";
-import { handleAdvancePhase } from "../mcp/tools/transition-tools";
+import { handleMarkExitCriterion, handleRecordDecision, handleRecordCheckOutcome } from "../mcp/tools/record-tools";
+import { handleAdvancePhase, handleExportCycle } from "../mcp/tools/transition-tools";
+import { handleUpdateProjectSpec } from "../mcp/tools/state-tools";
+import { VERSUS_VERSION } from "../version";
+import { testRunLocation } from "../shell-parse";
+import { createHash } from "crypto";
 import { getSafeguardsForPhase, validateSafeguard } from "../rules/safeguards";
 import {
   CONDITIONAL_LENSES,
@@ -118,8 +122,16 @@ const PROSE_ARCHITECTURE =
   "counter and comparing it against the configured ceiling. The store persists " +
   "counters and exposes get and set. Neither module knows about transport.";
 
-function writeArchitectureDoc(tmp: string, body = MODULE_TABLE): void {
+/** 6→7 needs the current version to record its deviations (0.15.0); the default doc says "nenhum". */
+const DEVIATIONS = "\n\n## Desvios\nnenhum\n";
+
+function writeArchitectureDoc(tmp: string, body = MODULE_TABLE + DEVIATIONS): void {
   writeSpecArtifact(tmp, "technical/architecture.md", body);
+}
+
+/** The approval decision a gated transition (3→4, 4→5, 6→7, cycle close) needs (0.15.0). */
+function approve(e: StateEngine, phase: number, approvedBy = "user"): void {
+  e.recordDecision(phase, "approval", `Phase ${phase} reviewed and accepted (test fixture)`, { proposedBy: "Qwen", approvedBy });
 }
 
 /**
@@ -957,6 +969,9 @@ function engineAt(phase: number): { engine: StateEngine; tmp: string } {
   const st = engine.getPhaseState()!;
   (st as any).currentPhase = phase;
   engine.recordDecision(phase, "scope", "phase forced for test");
+  // The records 0.15.0 gates on, so a test about another gate is not refused by these.
+  if ([3, 4, 6, 7].includes(phase)) approve(engine, phase);
+  if (phase === 5) engine.recordDecision(5, "scope-inventory", "M-01 ✅ · M-02 ✅ · UC-1 ✅ (fixture)");
   return { engine, tmp };
 }
 
@@ -1384,6 +1399,7 @@ test("after a loop, Phase 4 waits for Phase 3 to be answered again", () => {
     }
 
     markAll(e, 3);
+    approve(e, 3); // and the convergence approval of THIS pass (0.15.0)
     assert.ok(e.advancePhase(4).ok, "re-answering Phase 3 opens the gate");
   } finally {
     cleanTempWorkspace(tmp);
@@ -1479,35 +1495,24 @@ test("a module removed between versions is tolerated, not drift", () => {
   }
 });
 
-test("projectSpec entries carry the phase and the moment they were recorded", () => {
-  engine.initProject("spec", "stamps");
+test("new projectSpec entries are plain strings again; a repeat is not a second entry", () => {
+  engine.initProject("spec", "plain");
   engine.updateProjectSpec({ stack: ["TypeScript"] });
-  const [first] = engine.getProjectSpec().stack;
-  assert.strictEqual(typeof first, "object");
-  assert.strictEqual((first as any).value, "TypeScript");
-  assert.strictEqual((first as any).phase, 0);
-  assert.ok(!Number.isNaN(Date.parse((first as any).at)), "the stamp must be a real instant");
-
-  // Re-adding must not move the date forward: the question is when the project
-  // first knew this, not when it last repeated it.
-  const at = (first as any).at;
   engine.updateProjectSpec({ stack: ["TypeScript", "Node 18+"] });
-  const stack = engine.getProjectSpec().stack;
-  assert.strictEqual(stack.length, 2, "the repeat is not a second entry");
-  assert.strictEqual((stack[0] as any).at, at);
+  // 0.15.0: the {value, phase, at} stamp was research instrumentation, read by no gate.
+  assert.deepStrictEqual(engine.getProjectSpec().stack, ["TypeScript", "Node 18+"]);
 });
 
-test("a spec written before the stamps still reads", () => {
+test("a spec with stamped entries (0.7.0–0.14.x) still reads and dedups by value", () => {
   engine.initProject("spec", "back-compat");
-  // What 0.6.x wrote to disk.
   (engine.getPhaseState() as any).projectSpec = {
-    stack: ["TypeScript"], outOfScope: [], patterns: [], constraints: [],
+    stack: [{ value: "TypeScript", phase: 0, at: "2026-08-01T00:00:00.000Z" }], outOfScope: [], patterns: [], constraints: [],
   };
   engine.updateProjectSpec({ stack: ["TypeScript", "Node 18+"] });
   const stack = engine.getProjectSpec().stack;
-  assert.strictEqual(stack.length, 2, "the bare string is the same entry, not a new one");
-  assert.strictEqual(stack[0], "TypeScript", "old entries are left as they were");
-  assert.strictEqual((stack[1] as any).value, "Node 18+");
+  assert.strictEqual(stack.length, 2, "the stamped entry is the same value, not a new one");
+  assert.strictEqual((stack[0] as any).value, "TypeScript", "old entries are left as they were");
+  assert.strictEqual(stack[1], "Node 18+");
 });
 
 test("the three widened lens triggers are the ones in the table", () => {
@@ -2014,12 +2019,12 @@ test("numbered premises are answered; prose premises are not demanded", () => {
 
     // Prose premises: no id to check, so the gate stays quiet rather than
     // imposing a numbering convention half the corpus never agreed to.
-    writeArchitectureDoc(tmp, MODULE_TABLE + "\n\nWe assume the clock is monotonic.");
+    writeArchitectureDoc(tmp, MODULE_TABLE + "\n\nWe assume the clock is monotonic." + DEVIATIONS);
     assert.ok(e.advancePhase(7).ok, "prose premises must not block");
 
     // Numbered premises: now there is something to point at.
     (e.getPhaseState() as any).currentPhase = 6;
-    writeArchitectureDoc(tmp, MODULE_TABLE + "\n\nA-1: the clock is monotonic.\nA-2: keys are opaque.");
+    writeArchitectureDoc(tmp, MODULE_TABLE + "\n\nA-1: the clock is monotonic.\nA-2: keys are opaque." + DEVIATIONS);
     const blocked = e.advancePhase(7);
     assert.ok(!blocked.ok, "an id the design leaned on must be answered");
     if (!blocked.ok) {
@@ -2724,6 +2729,406 @@ test("S6 is ok (not warning) at 0 undiagnosed failures, warning once they accumu
   } finally {
     cleanTempWorkspace(tmp);
   }
+});
+
+// --- 0.15.0: port of Versus Claude 0.18.0–0.19.0 (cycle archive, approvals, provenance,
+// version, declared checks, promised tests, deviations, scope inventory, lesson guards).
+// The hook-channel tests have no counterpart: this host has no hooks.
+
+console.log("\n=== 0.15.0 — cycle archive, approvals, provenance, version ===\n");
+
+/** Walks a fresh project to `target` through REAL transitions, every gate satisfied. */
+function walkTo(target: number): void {
+  engine.initProject("Test", "Desc");
+  engine.updateScore(95, makeFullBreakdown(95));
+  writeArchitectureDoc(workspace);
+  writeCoverageMatrix(workspace);
+  writeSpecArtifact(workspace, "validation/critical-coverage.md",
+    "| finding | test | verdict |\n|---|---|---|\n| P-01 | test_key_absent_from_denial_log | covered |\n");
+  for (let p = 0; p < target; p++) {
+    markAll(engine, p);
+    if (p === 2) declareLenses(engine);
+    if (p === 5) engine.recordDecision(5, "scope-inventory", "M-01 ✅ · M-02 ✅ · UC-1 ✅ (fixture)");
+    if (p === 6) engine.recordTestOutcome("pytest", "pass", { source: "mcp-tool", exitCode: 0, exitSource: "echo" });
+    if ([3, 4, 6].includes(p)) approve(engine, p);
+    const r = engine.advancePhase(p + 1);
+    assert.ok(r.ok, `fixture ${p}→${p + 1}: ${r.ok ? "" : r.error.missingCriteria.join(" | ")}`);
+  }
+}
+
+/** Phase 7 with every gate satisfied, ready for start_new_cycle. */
+function toPhase7Closable(): void {
+  walkTo(7);
+  for (const c of engine.getExitCriteriaWithDefs(7)) engine.markExitCriterion(7, c.criterion, true, `P7 ${c.criterion} details`);
+  writeSpecArtifact(workspace, "references/lessons.md",
+    "# Lessons\n\n- The session TTL assumption from P0 was wrong; refreshed tokens broke it. guard: T-07\n- ORM lacked batch upsert. guard: none\n");
+  approve(engine, 7);
+}
+
+test("closing a cycle ARCHIVES its exit criteria (with details) instead of wiping them", () => {
+  walkTo(6);
+  for (const c of engine.getExitCriteriaWithDefs(6)) engine.markExitCriterion(6, c.criterion, true, `P6 ${c.criterion} details`);
+  engine.recordTestOutcome("pytest", "pass", { source: "mcp-tool", exitCode: 0, exitSource: "echo" });
+  approve(engine, 6);
+  assert.ok(engine.advancePhase(7).ok);
+  for (const c of engine.getExitCriteriaWithDefs(7)) engine.markExitCriterion(7, c.criterion, true);
+  writeSpecArtifact(workspace, "references/lessons.md", "# Lessons\n\n- The rate limiter's store assumed monotonic clocks; a VM migration moved time backwards.\n  guard: none\n");
+  approve(engine, 7);
+  const r = engine.startNewCycle();
+  assert.ok(r.ok, r.ok ? "" : String(r.error));
+  if (!r.ok) return;
+  assert.strictEqual(r.value.archived, 1);
+  assert.strictEqual(r.value.cycle, 2, "closing cycle 1 opens cycle 2 (was announced as 3 before 0.15.0)");
+  const st = engine.getPhaseState()!;
+  assert.strictEqual(st.exitCriteria.length, 0, "the live criteria still reset for the new cycle");
+  const rec = st.cycles![0];
+  assert.ok(rec.exitCriteria.some((c) => c.phase === 6 && c.criterion === "tests_passing" && c.details === "P6 tests_passing details"));
+  assert.ok(rec.exitCriteria.find((c) => c.criterion === "tests_passing")!.verifiedBy, "engine provenance survives too");
+  assert.ok(rec.transitions.some((t) => t.from === 6 && t.to === 7) && rec.transitions.some((t) => t.from === 7 && t.to === 0));
+  assert.strictEqual(rec.lastTestOutcome?.outcome, "pass");
+  assert.strictEqual(engine.currentCycle(), 2);
+  const md = fs.readFileSync(path.join(workspace, r.value.exportPath!), "utf-8");
+  assert.ok(md.includes("— Cycle 1") && md.includes("**tests_passing** — P6 tests_passing details"));
+  assert.ok(md.includes("approved by user") && md.includes("verified by engine") && md.includes("## Last reported test run"));
+});
+
+test("export_cycle writes the cycle in progress; refuses an unknown cycle with a reason", () => {
+  walkTo(5);
+  const ok = JSON.parse(handleExportCycle(engine, {}));
+  assert.strictEqual(ok.success, true);
+  assert.strictEqual(ok.inProgress, true);
+  assert.ok(fs.existsSync(path.join(workspace, ok.path)) && ok.path.endsWith("cycle-1-in-progress.md"));
+  const bad = JSON.parse(handleExportCycle(engine, { cycle: 4 }));
+  assert.strictEqual(bad.success, false);
+  assert.ok(String(bad.error).includes("cycle 1"));
+});
+
+test("3→4 needs an approval decision naming the approver", () => {
+  walkTo(3);
+  markAll(engine, 3);
+  const r = engine.advancePhase(4);
+  assert.strictEqual(r.ok, false, "stamped criteria alone no longer cross the convergence gate");
+  if (r.ok) return;
+  assert.ok(r.error.missingCriteria.some((m) => m.includes("approval") && m.includes("approvedBy")));
+  engine.recordDecision(3, "approval", "converged", {});
+  assert.strictEqual(engine.advancePhase(4).ok, false, "an approval without approvedBy is not an approval");
+  approve(engine, 3);
+  assert.strictEqual(engine.advancePhase(4).ok, true);
+});
+
+test("4→5 needs the convergence confirmation on the record (the 3→4 approval does not count)", () => {
+  walkTo(4);
+  markAll(engine, 4);
+  const r = engine.advancePhase(5);
+  assert.strictEqual(r.ok, false, "a Phase 4 that never showed its report to anyone must not reach code");
+  if (r.ok) return;
+  assert.ok(r.error.missingCriteria.some((m) => m.includes("[Phase 4] approval")));
+  approve(engine, 4);
+  assert.strictEqual(engine.advancePhase(5).ok, true);
+});
+
+test("an approval recorded in an EARLIER pass of Phase 3 does not carry over the 2↔3 loop", () => {
+  walkTo(3);
+  approve(engine, 3);
+  assert.ok(engine.advancePhase(2).ok, "the user loops back for another critique round");
+  markAll(engine, 2);
+  declareLenses(engine);
+  writeCoverageMatrix(workspace, [FINDINGS_TABLE, "", "## Iteração 2 — V(1)", "",
+    "| id | module | lens | severity | description |", "|----|--------|------|----------|-------------|",
+    "| RES-01 | store | Resilience | 🟡 | a failed write leaves the counter behind |"].join("\n"));
+  assert.ok(engine.advancePhase(3).ok);
+  markAll(engine, 3);
+  assert.strictEqual(engine.advancePhase(4).ok, false, "the pass-1 approval answered the OLD design");
+  approve(engine, 3);
+  assert.strictEqual(engine.advancePhase(4).ok, true);
+});
+
+test("the cycle close needs a Phase 7 approval decision", () => {
+  walkTo(7);
+  markAll(engine, 7);
+  writeSpecArtifact(workspace, "references/lessons.md", "# Lessons\n\n- The rate limiter's store assumed monotonic clocks; a VM migration moved time backwards.\n  guard: none\n");
+  const r = engine.startNewCycle();
+  assert.strictEqual(r.ok, false);
+  if (r.ok) return;
+  assert.ok(String(r.error).includes("[Phase 7] approval"));
+});
+
+test("a green run reported from OUTSIDE the project does not satisfy tests_passing", () => {
+  walkTo(6);
+  markAll(engine, 6);
+  approve(engine, 6);
+  const out = JSON.parse(handleRecordTestOutcome(engine, { command: "pytest", exit_code: 0, run_dir: "/tmp/scratch" }));
+  assert.strictEqual(out.outsideWorkspace, true);
+  assert.ok(String(out._warning).includes("OUTSIDE the project"), "said at the call, not only at the gate");
+  const r = engine.advancePhase(7);
+  assert.strictEqual(r.ok, false, "a pass from a scratch copy is not evidence about this project");
+  if (r.ok) return;
+  assert.ok(r.error.missingCriteria.some((m) => m.includes("OUTSIDE the project")));
+  // A cd inside the reported command is followed the same way…
+  JSON.parse(handleRecordTestOutcome(engine, { command: "cd /tmp/scratch && pytest", exit_code: 0 }));
+  assert.strictEqual(engine.getPhaseState()!.lastTestOutcome!.outsideWorkspace, true);
+  // …and a run inside the project (a subdirectory included) counts.
+  JSON.parse(handleRecordTestOutcome(engine, { command: "pytest", exit_code: 0, run_dir: "backend" }));
+  assert.ok(!engine.getPhaseState()!.lastTestOutcome!.outsideWorkspace);
+  assert.strictEqual(engine.advancePhase(7).ok, true);
+});
+
+test("without run_dir or a cd, nothing about the location is recorded", () => {
+  walkTo(6);
+  handleRecordTestOutcome(engine, { command: "pytest", exit_code: 0 });
+  const t = engine.getPhaseState()!.lastTestOutcome!;
+  assert.ok(!("runDir" in t) && !("outsideWorkspace" in t));
+});
+
+test("testRunLocation follows cd and flags runs/scripts outside the workspace", () => {
+  const ws = workspace;
+  const at = (cmd: string, cwd = ws) => testRunLocation(cmd, cwd, ws);
+  assert.strictEqual(at("npm test")!.outsideWorkspace, false);
+  assert.strictEqual(at('cd "aplicativo ios" && xcodebuild test -scheme A')!.runDir, path.join(ws, "aplicativo ios"));
+  assert.strictEqual(at("cd /tmp/scratch && node test.js")!.outsideWorkspace, true, "cd out of the project");
+  assert.strictEqual(at("npm test", "/tmp/elsewhere")!.outsideWorkspace, true, "cwd outside");
+  assert.strictEqual(at("node /tmp/scratch/check.test.js")!.outsideWorkspace, true, "script invoked by an outside path");
+  assert.strictEqual(at("xcodebuild test -derivedDataPath /tmp/dd -scheme A")!.outsideWorkspace, false, "an outside build dir is not a test script");
+  assert.strictEqual(at("ls -la"), undefined);
+});
+
+test("each transition fingerprints architecture.md (design existed, in that content, before the code)", () => {
+  walkTo(5);
+  const t45 = engine.getPhaseState()!.history.find((h) => h.from === 4 && h.to === 5)!;
+  const a = t45.artifacts!.find((x) => x.path === "specs/technical/architecture.md")!;
+  const buf = fs.readFileSync(path.join(workspace, "specs", "technical", "architecture.md"));
+  assert.strictEqual(a.bytes, buf.length);
+  assert.strictEqual(a.sha256, createHash("sha256").update(buf).digest("hex"));
+  assert.strictEqual(typeof t45.decisionsAt, "number");
+});
+
+test("decisions carry proposedBy/approvedBy and the cycle", () => {
+  engine.initProject("Test", "Desc");
+  const d = engine.recordDecision(0, "scope", "x", { proposedBy: " Qwen ", approvedBy: "" });
+  assert.strictEqual(d.proposedBy, "Qwen");
+  assert.ok(!("approvedBy" in d), "an empty approver is not recorded as one");
+  assert.strictEqual(d.cycle, 1);
+});
+
+test("version notice: once, for a project last opened by an older Versus, listing what is missing", () => {
+  toPhase7Closable();
+  fs.rmSync(path.join(workspace, "specs", "references", "lessons.md"));
+  delete engine.getPhaseState()!.versusVersion;            // simulate a pre-0.15.0 project
+  const st1 = JSON.parse(handleGetPhaseState(engine));
+  assert.ok(String(st1._versusUpdated).includes("older than 0.15.0"), "the notice reaches the model in the call it makes first");
+  assert.ok(String(st1._versusUpdated).includes("references/lessons.md"), "lessons.md missing at the close");
+  assert.ok(String(st1._versusUpdated).includes("approvedBy"));
+  assert.strictEqual(engine.getPhaseState()!.versusVersion, VERSUS_VERSION);
+  assert.strictEqual(engine.getPhaseState()!.migrations!.length, 1, "the migration is recorded");
+  assert.ok(!("_versusUpdated" in JSON.parse(handleGetPhaseState(engine))), "and announced only once");
+});
+
+test("a new project carries the running version (no spurious notice)", () => {
+  engine.initProject("Test", "Desc");
+  assert.strictEqual(engine.getPhaseState()!.versusVersion, VERSUS_VERSION);
+  assert.strictEqual(engine.noteVersion(), null);
+});
+
+test("VERSUS_VERSION matches package.json", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf-8"));
+  assert.strictEqual(pkg.version, VERSUS_VERSION);
+});
+
+test("the state header names the running Versus version and the cycle", () => {
+  walkTo(5);
+  const st = JSON.parse(handleGetPhaseState(engine));
+  assert.ok(String(st.header).endsWith(`| Cycle 1 | v${VERSUS_VERSION}`), st.header);
+  assert.strictEqual(st.currentCycle, 1);
+  assert.deepStrictEqual(st.archivedCycles, []);
+});
+
+test("get_phase_state stays inline on a huge project, update notice included", () => {
+  walkTo(5);
+  const st = engine.getPhaseState()!;
+  delete st.versusVersion;
+  for (let i = 0; i < 150; i++) engine.recordDecision(5, "implementation", `decision ${i} ` + "y".repeat(3000));
+  engine.updateProjectSpec({ stack: Array.from({ length: 80 }, (_, i) => `lib-${i}-with-a-long-name`) });
+  const out = handleGetPhaseState(engine);
+  // Measured on this host: results up to ~8,000 characters always reached the model inline;
+  // from ~11,000 almost always moved to a file. Keep well under the first.
+  assert.ok(out.length < 7_000, `get_phase_state grew to ${out.length} characters`);
+  assert.ok(JSON.parse(out)._versusUpdated, "the notice is not the part that gets cut");
+});
+
+test("update_project_spec returns what changed and the counts, not the whole spec", () => {
+  engine.initProject("Test", "Desc");
+  engine.updateProjectSpec({ stack: Array.from({ length: 200 }, (_, i) => `lib-${i}-with-a-long-name`) });
+  const r = JSON.parse(handleUpdateProjectSpec(engine, { stack: ["lib-0-with-a-long-name", "Vite"], constraints: ["offline"] }));
+  assert.deepStrictEqual(r.added, { stack: ["Vite"], constraints: ["offline"] }, "only what is new");
+  assert.strictEqual(r.counts.stack, 201);
+  assert.ok(!("projectSpec" in r));
+  assert.ok(JSON.stringify(r).length < 600, "small whatever the size of the spec");
+});
+
+test("S6 pattern ignores the plumbing: pipes and the exit echo do not restart the count", () => {
+  walkTo(5);
+  engine.recordTestOutcome('npx playwright test; echo "VERSUS_TEST_EXIT=$?"', "fail");
+  engine.recordTestOutcome('npx playwright test 2>&1 | grep -E "passed|failed"; echo "VERSUS_TEST_EXIT=${PIPESTATUS[0]}"', "fail");
+  assert.strictEqual(engine.getLoopCounter().count, 2, "same suite, different plumbing: one count");
+  assert.strictEqual(engine.getLoopCounter().pattern, "npx playwright test");
+  engine.recordTestOutcome("cd app && npx playwright test --reporter=line", "fail");
+  assert.strictEqual(engine.getLoopCounter().count, 3, "a cd and a flag do not change the suite either");
+  assert.ok(engine.isLoopBlocked());
+});
+
+test("the Phase 7 approval writes the cycle record even if no new cycle follows", () => {
+  walkTo(7);
+  const r = JSON.parse(handleRecordDecision(engine, { phase: 7, category: "approval", content: "Projeto concluído — atende o MVP", approvedBy: "user ('Projeto concluído')" }));
+  assert.ok(String(r._export).includes(".versus/cycles/cycle-1.md"), "a project that ENDS at Phase 7 still leaves its record");
+  const md = fs.readFileSync(path.join(workspace, ".versus", "cycles", "cycle-1.md"), "utf-8");
+  assert.ok(md.includes("Projeto concluído"));
+  const plain = JSON.parse(handleRecordDecision(engine, { phase: 7, category: "process", content: "note" }));
+  assert.ok(!("_export" in plain), "only an approval closes the cycle");
+});
+
+console.log("\n=== 0.15.0 — declared checks, promised tests, deviations, scope inventory, lesson guards ===\n");
+
+/** Phase 6 with everything but the gate under test satisfied. */
+function toPhase6Ready(): void {
+  walkTo(6);
+  markAll(engine, 6);
+  engine.recordTestOutcome("pytest", "pass", { source: "mcp-tool", exitCode: 0, exitSource: "echo" });
+  approve(engine, 6);
+}
+
+test("a declared check is EXECUTED, not attested: blocked until a reported result meets it", () => {
+  toPhase6Ready();
+  const d = JSON.parse(handleMarkExitCriterion(engine, {
+    phase: 6, criterion: "edge_cases", met: true, details: "OAuth removed from all 4 services",
+    check_command: "grep -rli oauth services/ | wc -l", check_expect: "output:^\\s*0\\s*$",
+  }));
+  assert.strictEqual(d.success, true);
+  assert.ok(String(d._check).includes("record_check_outcome"));
+  let r = engine.advancePhase(7);
+  assert.strictEqual(r.ok, false, "the audit's case: 'grep = 0' attested, never run");
+  if (r.ok) return;
+  assert.ok(r.error.missingCriteria.some((m) => m.includes("no result has been reported")));
+  const bad = JSON.parse(handleRecordCheckOutcome(engine, { criterion: "edge_cases", output: "1\n" }));
+  assert.strictEqual(bad.ok, false, "the engine compares — one service still has it");
+  r = engine.advancePhase(7);
+  assert.strictEqual(r.ok, false);
+  if (r.ok) return;
+  assert.ok(r.error.missingCriteria.some((m) => m.includes("did NOT give")));
+  JSON.parse(handleRecordCheckOutcome(engine, { criterion: "edge_cases", output: "0\n" }));
+  assert.strictEqual(engine.advancePhase(7).ok, true);
+});
+
+test("an exit-code check reads the VERSUS_EXIT number; bad expectations and undeclared checks are refused", () => {
+  toPhase6Ready();
+  assert.strictEqual(engine.declareCheck(6, "edge_cases", "make lint", "exit:0").ok, true);
+  assert.strictEqual(engine.recordCheckOutcome("edge_cases", "lint ok\nVERSUS_EXIT=0", 0).ok, true);
+  assert.strictEqual(engine.advancePhase(7).ok, true);
+  assert.strictEqual(engine.declareCheck(7, "x", "true", "zero please").ok, false);
+  const none = JSON.parse(handleRecordCheckOutcome(engine, { criterion: "lessons_documented", output: "x" }));
+  assert.strictEqual(none.success, false);
+  assert.ok(String(none.error).includes("No check is declared"));
+});
+
+test("re-declaring a check voids the earlier result", () => {
+  toPhase6Ready();
+  engine.declareCheck(6, "edge_cases", "make lint", "exit:0");
+  engine.recordCheckOutcome("edge_cases", "VERSUS_EXIT=0", 0);
+  const ec = engine.getPhaseState()!.exitCriteria.find((c) => c.criterion === "edge_cases")!;
+  ec.check!.witnessed!.at = new Date(Date.now() - 60_000).toISOString();   // reported before…
+  engine.declareCheck(6, "edge_cases", "make lint --strict", "exit:0");    // …the new declaration
+  assert.strictEqual(engine.advancePhase(7).ok, false);
+});
+
+test("6→7: every T-xx promised by the CURRENT architecture version must appear in a test file", () => {
+  toPhase6Ready();
+  writeArchitectureDoc(workspace,
+    "# Architecture\n\n## V(1)\n" + MODULE_TABLE + "\nPromised: T-09 (dropped later)\n\n## V(2)\n" + MODULE_TABLE +
+    "\nPromised tests: T-01 fast double-tap; T-02 ready flag only with hashed run id\n\n## Desvios\nnenhum\n");
+  fs.mkdirSync(path.join(workspace, "tests"), { recursive: true });
+  fs.writeFileSync(path.join(workspace, "tests", "input.test.js"), "test('T-01 fast double-tap', () => {})\n");
+  const r = engine.advancePhase(7);
+  assert.strictEqual(r.ok, false);
+  if (r.ok) return;
+  const m = r.error.missingCriteria.find((x) => x.includes("promised tests"))!;
+  assert.ok(m.includes("T-02") && !m.includes("T-01") && !m.includes("T-09"), "only the current version's unimplemented promise");
+  fs.writeFileSync(path.join(workspace, "tests", "ready.test.js"), "// T-02\ntest('ready', () => {})\n");
+  assert.strictEqual(engine.advancePhase(7).ok, true);
+});
+
+test("6→7: the current architecture version records its deviations (or 'nenhum')", () => {
+  toPhase6Ready();
+  const arch = path.join(workspace, "specs", "technical", "architecture.md");
+  fs.writeFileSync(arch, "# Architecture\n\n## V(1)\n" + MODULE_TABLE + "\n\n## Desvios\nV0 note\n\n## V(2)\n" + MODULE_TABLE + "\n");
+  let r = engine.advancePhase(7);
+  assert.strictEqual(r.ok, false, "a Desvios section of an OLD version does not cover the current one");
+  if (r.ok) return;
+  assert.ok(r.error.missingCriteria.some((m) => m.includes("Desvios")));
+  fs.appendFileSync(arch, "\n## Desvios\n\n## Notes\nx\n");
+  assert.strictEqual(engine.advancePhase(7).ok, false, "an empty Desvios section is not a record");
+  fs.writeFileSync(arch, fs.readFileSync(arch, "utf-8").replace("## Desvios\n\n## Notes", "## Desvios\n- element removed instead of blanked — leak on reopen\n\n## Notes"));
+  assert.strictEqual(engine.advancePhase(7).ok, true);
+});
+
+test("5→6: the Scope Inventory leaves a record", () => {
+  walkTo(5);
+  markAll(engine, 5);
+  // walkTo records nothing for Phase 5 until it leaves it, so this pass has no inventory yet.
+  const r = engine.advancePhase(6);
+  assert.strictEqual(r.ok, false, "MUST DISPLAY was never a record (ESJUD crossed 5→6 without it)");
+  if (r.ok) return;
+  assert.ok(r.error.missingCriteria.some((m) => m.includes("scope-inventory")));
+  engine.recordDecision(5, "scope-inventory", "all good");
+  assert.strictEqual(engine.advancePhase(6).ok, false, "an inventory without ✅/❌ items is not an inventory");
+  engine.recordDecision(5, "scope-inventory", "M-01 rate-limiter ✅\nM-02 store ✅\nUC-1 end-to-end ✅");
+  assert.strictEqual(engine.advancePhase(6).ok, true);
+});
+
+test("lessons: each says whether it became a guard; non-lesson sections are skipped", () => {
+  engine.initProject("Test", "Desc");
+  writeSpecArtifact(workspace, "references/lessons.md",
+    "# Lições\n\n## 1. Domínio — dependências externas\ntexto\nguard: T-07\n\n## 2. Stack — ViewModel recriado\ntexto\n\n" +
+    "## 3. mTLS\ntexto\nguard: none\n\n## Backlog para o ciclo v2.0\n1. item\n");
+  assert.deepStrictEqual(engine.lessons().map((l) => l.guard), ["T-07", null, "none"], "3 lessons; the backlog is not one");
+  writeSpecArtifact(workspace, "references/lessons.md", "# Lessons\n\n- first lesson\n  guard: T-01\n- second lesson\nguard: none\n");
+  assert.deepStrictEqual(engine.lessons().map((l) => l.guard), ["T-01", "none"]);
+});
+
+test("start_new_cycle is blocked while a lesson lacks its guard line; 'none' ones go to the human", () => {
+  walkTo(7);
+  markAll(engine, 7);
+  approve(engine, 7);
+  const lp = path.join(workspace, "specs", "references", "lessons.md");
+  fs.writeFileSync(lp, "# Lessons\n\n- The session TTL assumption from P0 was wrong; refreshed tokens broke it.\n- The ORM lacked batch upsert; had to hand-roll it.\n  guard: none\n");
+  const r = engine.startNewCycle();
+  assert.strictEqual(r.ok, false);
+  if (r.ok) return;
+  assert.ok(String(r.error).includes("guard") && String(r.error).includes("session TTL"));
+  const m = JSON.parse(handleMarkExitCriterion(engine, { phase: 7, criterion: "lessons_documented", met: true }));
+  assert.ok(m._lessonsWithoutGuard.lessons.some((t: string) => t.includes("ORM")));
+  assert.ok(m._lessonsMissingGuardLine.lessons.some((t: string) => t.includes("session TTL")));
+  fs.writeFileSync(lp, fs.readFileSync(lp, "utf-8").replace("broke it.\n", "broke it.\n  guard: T-07\n"));
+  assert.strictEqual(engine.startNewCycle().ok, true);
+});
+
+test("lessons accumulated across cycles: only the CURRENT cycle's section is asked for guards", () => {
+  engine.initProject("Test", "Desc");
+  engine.getPhaseState()!.history.push({ from: 7, to: 0, timestamp: new Date().toISOString(), criteriaMet: [] });
+  writeSpecArtifact(workspace, "references/lessons.md",
+    "# Lições\n\n# Ciclo 1 — MVP\n\n## Lição 1 — antiga, sem guard\ntexto\n\n## Métricas do ciclo\n- 12 testes\n\n" +
+    "# Ciclo 2 — v2\n\n## Lição 1 — nova\nguard: T-03\n\n## Referências acumuladas\n- doc X\n");
+  assert.deepStrictEqual(engine.lessons().map((l) => l.guard), ["T-03"]);
+});
+
+test("guidance teaches the new records before the gates fire", () => {
+  engine.initProject("Test", "Desc");
+  const all = (p: number) => splitGuidance(getFullGuidance(p)).join("\n");
+  assert.ok(all(1).includes("T-01"), "Phase 1: promised tests get ids");
+  assert.ok(all(3).includes("category='approval'"), "Phase 3: convergence approval");
+  assert.ok(all(4).includes("category='approval'"), "Phase 4: convergence confirmation");
+  assert.ok(all(5).includes("scope-inventory") && all(5).includes("undiscussed-choices"));
+  assert.ok(all(6).includes("## Desvios") && all(6).includes("check_command") && all(6).includes("record_check_outcome") && all(6).includes("run_dir"));
+  assert.ok(all(7).includes("guard: <test id>") && all(7).includes("category='approval'"));
+  for (let p = 0; p <= 7; p++) assert.ok(!all(p).includes("SessionStart"), `Phase ${p} must not promise a hook this host lacks`);
 });
 
 runDeferred().then(() => {

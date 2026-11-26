@@ -1,5 +1,7 @@
 // Core types for Versus
 
+import { VERSUS_VERSION } from "../version";
+
 export interface PhaseState {
   agent?: "copilot" | "claude" | "localqwen";  // identifies which extension owns this state
   /**
@@ -24,6 +26,17 @@ export interface PhaseState {
   activatedLenses?: LensActivation[];
   /** Last test run the engine witnessed, via record_test_outcome. Gates tests_passing. */
   lastTestOutcome?: TestOutcome;
+  /** Versus version that last opened this project. Absent = a project last opened by a
+   *  Versus older than 0.15.0. A mismatch with the running version triggers a one-time
+   *  update notice listing what the new version requires that the project lacks. */
+  versusVersion?: string;
+  /** Update notices issued — the migration record. */
+  migrations?: { from: string | null; to: string; at: string; pending: string[] }[];
+  /** Closed cycles, archived by start_new_cycle BEFORE the reset. Exit criteria (with
+   *  details and provenance), transitions and the test outcome of a cycle used to be
+   *  wiped when the next one began. Decisions are not copied (they stay in `decisions`);
+   *  a cycle's decisions are those timestamped within [startedAt, closedAt]. */
+  cycles?: CycleRecord[];
   lastPhaseStateCheck?: string;  // ISO timestamp — gateway guard for smaller models
   createdAt: string;             // ISO timestamp
   updatedAt: string;
@@ -31,11 +44,9 @@ export interface PhaseState {
 }
 
 /**
- * One projectSpec entry, stamped with when it was recorded. Without the stamp
- * the spec can only be read as it stands now, so "which entries existed when
- * Phase 2 declared its lenses?" has no answer — and an analysis that cannot date
- * the spec has to drop it whole rather than risk crediting the critique with
- * context it never saw.
+ * A stamped projectSpec entry, as written from 0.7.0 to 0.14.x. The stamp was
+ * research instrumentation, read by no gate; 0.15.0 writes plain strings again and
+ * keeps reading this form for projects that have it.
  */
 export interface SpecEntry {
   value: string;
@@ -77,6 +88,11 @@ export interface TestOutcome {
   at: string;
   command?: string;
   provenance?: TestProvenance;
+  /** Directory the run happened in, as reported by the model (record_test_outcome run_dir). */
+  runDir?: string;
+  /** True when that directory is outside the project. Such a pass does not satisfy
+   *  tests_passing: a green suite run from a scratch copy says nothing about this one. */
+  outsideWorkspace?: boolean;
 }
 
 /**
@@ -164,6 +180,28 @@ export interface Decision {
   category: string;
   content: string;
   timestamp: string;
+  /** Cycle the decision was recorded in (0.15.0+; older decisions: derive from timestamps). */
+  cycle?: number;
+  /** Who proposed it — e.g. "Qwen", "user". A recommendation the user agreed to is not a
+   *  request the user made. */
+  proposedBy?: string;
+  /** Who approved it, and on what basis when it matters. Required on the approval decision
+   *  that gates 3→4, 4→5, 6→7 and the cycle close. */
+  approvedBy?: string;
+}
+
+/** One closed cycle, as archived by start_new_cycle. */
+export interface CycleRecord {
+  cycle: number;
+  startedAt: string;
+  closedAt: string;
+  phase0Score: number | null;
+  exitCriteria: ExitCriterionState[];
+  transitions: PhaseTransition[];
+  lastTestOutcome?: TestOutcome;
+  decisionCount: number;
+  /** Path (relative to the workspace) of the Markdown export written at close. */
+  exportPath?: string;
 }
 
 export interface ExitCriterionState {
@@ -173,6 +211,20 @@ export interface ExitCriterionState {
   details?: string;
   /** Only on criteria with a `verify:`, and only once their gate has passed. */
   verifiedBy?: VerificationProvenance;
+  /**
+   * A mechanical check DECLARED for this criterion, e.g. "OAuth gone from all 4 services" →
+   * `grep -rl oauth services/ | wc -l` expecting output "0". The gate requires a result
+   * reported AFTER the declaration that meets the expectation. On this host nothing watches
+   * the shell, so the result is relayed by the model through record_check_outcome — the same
+   * guarantee record_test_outcome gives, weaker than a hook's.
+   */
+  check?: {
+    command: string;
+    /** "exit:<n>" or "output:<regex>". */
+    expect: string;
+    declaredAt: string;
+    witnessed?: { at: string; ok: boolean; exitCode?: number; outputTail: string; outputSha256: string; source: "mcp-tool" };
+  };
 }
 
 export interface SafeguardState {
@@ -194,6 +246,12 @@ export interface PhaseTransition {
   to: number;
   timestamp: string;
   criteriaMet: string[];
+  /** Content fingerprint of the design at the moment of the transition: evidence,
+   *  independent of git, that the design existed — in that content — before the code. */
+  artifacts?: { path: string; sha256: string; bytes: number }[];
+  /** decisions.length at the moment of the transition: orders decisions against
+   *  transitions without trusting clock resolution (two events in one millisecond). */
+  decisionsAt?: number;
 }
 
 export interface TransitionError {
@@ -224,6 +282,7 @@ export function createDefaultState(name: string, description: string): PhaseStat
   return {
     agent: "localqwen",
     stateVersion: STATE_VERSION,
+    versusVersion: VERSUS_VERSION,
     projectName: name,
     projectDescription: description,
     projectSpec: { stack: [], outOfScope: [], patterns: [], constraints: [] },

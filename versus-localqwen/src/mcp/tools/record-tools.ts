@@ -25,11 +25,22 @@ export const recordDecisionTool: Tool = {
         description:
           "Category: 'architecture', 'pattern', 'constraint', 'scope', 'technology', 'requirement', 'testing', " +
           "'process' (methodology/session decisions, e.g. an LLM switch or session renewal), " +
-          "'diagnosis' (root cause of a test failure — clears the S6 loop counter; 'bugfix' and 'root-cause' are aliases).",
+          "'diagnosis' (root cause of a test failure — clears the S6 loop counter; 'bugfix' and 'root-cause' are aliases), " +
+          "'approval' (a human sign-off, with approvedBy), 'scope-inventory', 'undiscussed-choices'.",
       },
       content: {
         type: "string",
         description: "Decision content in free text.",
+      },
+      proposedBy: {
+        type: "string",
+        description: "Who proposed it, e.g. 'Qwen' or 'user'.",
+      },
+      approvedBy: {
+        type: "string",
+        description:
+          "Who approved it, and on what basis ('user, after running it in the browser'). REQUIRED on the approval " +
+          "decision that 3→4, 4→5, 6→7 and the cycle close are refused without.",
       },
     },
     required: ["phase", "category", "content"],
@@ -93,22 +104,82 @@ export const markExitCriterionTool: Tool = {
         type: "string",
         description: "Optional details about how it was met.",
       },
+      check_command: {
+        type: "string",
+        description:
+          "A command that checks the criterion mechanically (e.g. `grep -rli oauth services/ | wc -l`). The gate then " +
+          "needs a result reported with record_check_outcome, after this, that meets check_expect.",
+      },
+      check_expect: {
+        type: "string",
+        description:
+          "'exit:<n>' (default 'exit:0') or 'output:<regex>' matched against the output.",
+      },
     },
     required: ["phase", "criterion", "met"],
   },
 };
 
+export const recordCheckOutcomeTool: Tool = {
+  name: "record_check_outcome",
+  description:
+    "Reports what a check declared with mark_exit_criterion(check_command=...) printed. Run the command exactly " +
+    "as declared (for 'exit:' append `; echo \"VERSUS_EXIT=$?\"`). The engine compares it with the expectation.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      criterion: { type: "string" },
+      output: { type: "string", description: "What it printed (the last lines suffice)." },
+      exit_code: { type: "number", description: "The VERSUS_EXIT number." },
+      phase: { type: "number", description: "Defaults to the current phase." },
+    },
+    required: ["criterion", "output"],
+  },
+};
+
+export function handleRecordCheckOutcome(
+  engine: StateEngine,
+  args: { criterion: string; output?: string; exit_code?: number; phase?: number }
+): string {
+  const r = engine.recordCheckOutcome(
+    String(args.criterion ?? ""),
+    typeof args.output === "string" ? args.output : "",
+    typeof args.exit_code === "number" ? args.exit_code : undefined,
+    typeof args.phase === "number" ? args.phase : undefined
+  );
+  if (!r.ok) return JSON.stringify({ success: false, error: r.error });
+  return JSON.stringify({
+    success: true,
+    ...r.value,
+    note: r.value.ok
+      ? "The reported result meets the declared expectation; the gate will accept this check."
+      : `The reported result does NOT meet ${r.value.expect}. The transition stays blocked on this criterion until a run that does is reported.`,
+  });
+}
+
 export function handleRecordDecision(
   engine: StateEngine,
-  args: { phase: number; category: string; content: string }
+  args: { phase: number; category: string; content: string; proposedBy?: string; approvedBy?: string }
 ): string {
   try {
-    const decision = engine.recordDecision(args.phase, args.category, args.content);
-    return JSON.stringify({
+    const decision = engine.recordDecision(args.phase, args.category, args.content, {
+      proposedBy: typeof args.proposedBy === "string" ? args.proposedBy : undefined,
+      approvedBy: typeof args.approvedBy === "string" ? args.approvedBy : undefined,
+    });
+    const result: Record<string, unknown> = {
       success: true,
       id: decision.id,
       timestamp: decision.timestamp,
-    });
+    };
+    // The Phase 7 approval closes the cycle whether or not a new one follows. A project
+    // that ENDS at Phase 7 never calls start_new_cycle, so its readable record was never
+    // written. Write it here; start_new_cycle rewrites it from the archive if work goes on.
+    const st = engine.getPhaseState();
+    if (decision.approvedBy && args.phase === 7 && st?.currentPhase === 7) {
+      const ex = engine.exportCycle(undefined, true);
+      if (ex.ok) result._export = `Cycle ${ex.value.cycle} record written to ${ex.value.path} (${ex.value.bytes} bytes).`;
+    }
+    return JSON.stringify(result);
   } catch (err) {
     return JSON.stringify({ success: false, error: String(err) });
   }
@@ -132,7 +203,7 @@ export function handleUpdateScore(
 
 export function handleMarkExitCriterion(
   engine: StateEngine,
-  args: { phase: number; criterion: string; met: boolean; details?: string }
+  args: { phase: number; criterion: string; met: boolean; details?: string; check_command?: string; check_expect?: string }
 ): string {
   try {
     // Only the CURRENT phase's criteria can be marked. advance_phase reads only those, so a
@@ -151,6 +222,17 @@ export function handleMarkExitCriterion(
         currentPhase: current,
       });
     }
+    let checkNote: string | undefined;
+    if (typeof args.check_command === "string" && args.check_command.trim()) {
+      const d = engine.declareCheck(args.phase, args.criterion, args.check_command, args.check_expect);
+      if (!d.ok) return JSON.stringify({ success: false, error: d.error });
+      const exp = args.check_expect?.trim() || "exit:0";
+      checkNote =
+        `Check declared. Now run it in the terminal, exactly: \`${args.check_command.trim()}` +
+        `${exp.startsWith("exit:") ? `; echo "VERSUS_EXIT=$?"` : ""}\`, then report it with ` +
+        `record_check_outcome(criterion='${args.criterion}', output='<what it printed>'` +
+        `${exp.startsWith("exit:") ? ", exit_code=<the VERSUS_EXIT number>" : ""}). The gate needs a reported ${exp}.`;
+    }
     engine.markExitCriterion(args.phase, args.criterion, args.met, args.details);
     const criteria = engine.getExitCriteriaWithDefs(args.phase);
     const metCount = criteria.filter((c) => c.met).length;
@@ -164,6 +246,15 @@ export function handleMarkExitCriterion(
       totalMet: metCount,
       totalCriteria: criteria.length,
     };
+    if (checkNote) response._check = checkNote;
+    // Lessons that did not become a guard are listed for the HUMAN to decide on.
+    if (args.criterion === "lessons_documented") {
+      const ls = engine.lessons();
+      const none = ls.filter((l) => l.guard?.toLowerCase() === "none").map((l) => l.title.slice(0, 80));
+      const missing = ls.filter((l) => !l.guard).map((l) => l.title.slice(0, 80));
+      if (none.length) response._lessonsWithoutGuard = { lessons: none, action: "Show these to the user: each is a lesson kept only as text. Ask whether any should become a test now." };
+      if (missing.length) response._lessonsMissingGuardLine = { lessons: missing, action: "Add 'guard: <test id>' or 'guard: none' to each — start_new_cycle is blocked until every lesson says." };
+    }
 
     // When all criteria for any phase < 7 become met, force next action: advance_phase
     if (allMet && args.phase < 7 && args.met) {

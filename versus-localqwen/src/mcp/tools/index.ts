@@ -4,8 +4,8 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { StateEngine } from "../../state/engine";
 
 import { getPhaseStateTool, getDecisionsTool, getExitCriteriaTool, updateProjectSpecTool, handleGetPhaseState, handleGetDecisions, handleGetExitCriteria, handleUpdateProjectSpec } from "./state-tools";
-import { advancePhaseTool, startIterationTool, startNewCycleTool, handleAdvancePhase, handleStartIteration, handleStartNewCycle } from "./transition-tools";
-import { recordDecisionTool, updateScoreTool, markExitCriterionTool, handleRecordDecision, handleUpdateScore, handleMarkExitCriterion } from "./record-tools";
+import { advancePhaseTool, startIterationTool, startNewCycleTool, exportCycleTool, handleAdvancePhase, handleStartIteration, handleStartNewCycle, handleExportCycle } from "./transition-tools";
+import { recordDecisionTool, updateScoreTool, markExitCriterionTool, recordCheckOutcomeTool, handleRecordDecision, handleUpdateScore, handleMarkExitCriterion, handleRecordCheckOutcome } from "./record-tools";
 import { checkSafeguardTool, checkAllSafeguardsTool, handleCheckSafeguard, handleCheckAllSafeguards } from "./safeguard-tools";
 import { checkSpecsStatusTool, handleCheckSpecsStatus } from "./specs-tools";
 import { initProjectTool, handleInitProject } from "./project-tools";
@@ -31,8 +31,10 @@ export const ALL_TOOLS: Tool[] = [
   getPhaseGuidanceTool,
   updateProjectSpecTool,
   startNewCycleTool,
+  exportCycleTool,
   checkContextBudgetTool,
   recordTestOutcomeTool,
+  recordCheckOutcomeTool,
   recordActivatedLensesTool,
   askUserTool,
 ];
@@ -59,6 +61,7 @@ const GUARD_EXEMPT = new Set([
   "get_phase_state",
   "init_project",
   "start_new_cycle",
+  "export_cycle",
   "check_context_budget",
 ]);
 
@@ -125,6 +128,7 @@ function sanitize(args: Record<string, unknown>): Record<string, unknown> {
   if ("conditional" in out) out.conditional = toStringArray(out.conditional);
   if ("exit_code" in out) out.exit_code = toNumber(out.exit_code);
   if ("part" in out) out.part = toNumber(out.part);
+  if ("cycle" in out) out.cycle = toNumber(out.cycle);
   return out;
 }
 
@@ -156,8 +160,11 @@ async function dispatch(
           exit_code?: number;
           outcome?: "pass" | "fail" | "unknown";
           failed?: boolean;
+          run_dir?: string;
         }
       );
+    case "record_check_outcome":
+      return handleRecordCheckOutcome(engine, args as { criterion: string; output?: string; exit_code?: number; phase?: number });
     case "get_phase_state":
       return handleGetPhaseState(engine);
     case "get_decisions":
@@ -169,11 +176,11 @@ async function dispatch(
     case "start_iteration":
       return handleStartIteration(engine, args as { phase: number });
     case "record_decision":
-      return handleRecordDecision(engine, args as { phase: number; category: string; content: string });
+      return handleRecordDecision(engine, args as { phase: number; category: string; content: string; proposedBy?: string; approvedBy?: string });
     case "update_score":
       return handleUpdateScore(engine, args as { score: number; breakdown: any });
     case "mark_exit_criterion":
-      return handleMarkExitCriterion(engine, args as { phase: number; criterion: string; met: boolean; details?: string });
+      return handleMarkExitCriterion(engine, args as { phase: number; criterion: string; met: boolean; details?: string; check_command?: string; check_expect?: string });
     case "check_safeguard":
       return handleCheckSafeguard(engine, args as { id: string });
     case "check_all_safeguards":
@@ -192,6 +199,8 @@ async function dispatch(
       return handleUpdateProjectSpec(engine, args as { stack?: string[]; outOfScope?: string[]; patterns?: string[]; constraints?: string[] });
     case "start_new_cycle":
       return handleStartNewCycle(engine);
+    case "export_cycle":
+      return handleExportCycle(engine, args as { cycle?: number });
     default:
       return JSON.stringify({ error: `Unknown tool: ${toolName}` });
   }

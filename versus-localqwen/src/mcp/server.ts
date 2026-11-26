@@ -12,6 +12,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import * as fs from "fs";
 import * as path from "path";
+import { VERSUS_VERSION } from "../version";
 import { StateEngine } from "../state/engine";
 import { ALL_TOOLS, handleToolCall } from "./tools/index";
 import { Elicitor } from "./tools/ask-tools";
@@ -40,7 +41,7 @@ async function main() {
   const server = new Server(
     {
       name: "versus-localqwen",
-      version: "0.14.0",
+      version: VERSUS_VERSION,
     },
     {
       capabilities: {

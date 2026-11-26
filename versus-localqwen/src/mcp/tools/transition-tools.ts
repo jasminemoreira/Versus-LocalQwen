@@ -116,7 +116,8 @@ export const startNewCycleTool: Tool = {
     "Starts a new development cycle (v1→v2) after Phase 7 completion. " +
     "Resets phase to 0 while PRESERVING all decisions, projectSpec, and history from the previous cycle. " +
     "specs/ directory is also preserved as baseline for the new cycle. " +
-    "Phase 7 exit criteria must all be met before calling this tool. " +
+    "Needs every Phase 7 exit criterion met and a Phase 7 approval decision (approvedBy). The closing " +
+    "cycle is archived and exported to .versus/cycles/cycle-N.md. " +
     "Use at the end of Phase 7 when the user wants to evolve the project to the next version.",
   inputSchema: {
     type: "object" as const,
@@ -130,13 +131,36 @@ export function handleStartNewCycle(engine: StateEngine): string {
   if (result.ok) {
     return JSON.stringify({
       success: true,
-      message: `New cycle started (cycle ${result.value.cycle}). Phase reset to 0. Previous decisions and specs/ preserved as baseline.`,
+      message: `Cycle ${result.value.archived} closed and archived${result.value.exportPath ? ` (readable export: ${result.value.exportPath})` : ""}. New cycle started (cycle ${result.value.cycle}). Phase reset to 0. Previous decisions and specs/ preserved as baseline.`,
       cycle: result.value.cycle,
+      archivedCycle: result.value.archived,
+      exportPath: result.value.exportPath,
       currentPhase: 0,
       hint: "Phase 0 of the new cycle starts from existing specs/ — knowledge is NOT lost. Use get_decisions() to review previous cycle context. Negative scope from the previous cycle can become new scope (with operator approval).",
-      _modelSwitchAction: "⚠️ MODEL SWITCH RECOMMENDED — A new cycle starts at Phase 0 (design). If you switched to a code-execution model at the original LLM Switch Point in cycle " + (result.value.cycle - 1) + " Phase 4→5, you are likely STILL on that model. Phase 0 design benefits from the MOST CAPABLE model. DISPLAY this notification to the user and recommend the same close+reopen+retomar Versus mechanic used at the original LLM Switch Point: (1) close this chat, (2) open a new chat with the design-grade model, (3) type `retomar Versus`. The new model will recover state cleanly via SessionStart hook and resume Phase 0 of the new cycle.",
+      _modelSwitchAction: "⚠️ MODEL SWITCH RECOMMENDED — A new cycle starts at Phase 0 (design). If you switched to a code-execution model at the original LLM Switch Point in cycle " + (result.value.cycle - 1) + " Phase 4→5, you are likely STILL on that model. Phase 0 design benefits from the MOST CAPABLE model. DISPLAY this notification to the user and recommend the same close+reopen+retomar Versus mechanic used at the original LLM Switch Point: (1) close this chat, (2) open a new chat with the design-grade model, (3) type `retomar Versus`. The new model recovers the state through get_phase_state and get_phase_guidance (the project's instruction file tells it to) and resumes Phase 0 of the new cycle.",
     });
   } else {
     return JSON.stringify({ success: false, error: result.error });
   }
+}
+
+export const exportCycleTool: Tool = {
+  name: "export_cycle",
+  description:
+    "Writes a readable Markdown record of a cycle (transitions, exit criteria, decisions, last test run) to " +
+    ".versus/cycles/ and returns its path. For audits or when the user asks what happened in a cycle. " +
+    "No argument = the cycle in progress.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      cycle: { type: "number" },
+    },
+    required: [],
+  },
+};
+
+export function handleExportCycle(engine: StateEngine, args: { cycle?: number }): string {
+  const r = engine.exportCycle(typeof args.cycle === "number" ? args.cycle : undefined);
+  if (!r.ok) return JSON.stringify({ success: false, error: r.error });
+  return JSON.stringify({ success: true, ...r.value });
 }

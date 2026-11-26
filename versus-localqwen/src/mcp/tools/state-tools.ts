@@ -2,8 +2,10 @@
 
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { StateEngine } from "../../state/engine";
-import { specItemValue } from "../../state/types";
+import { SpecItem, specItemValue } from "../../state/types";
 import { validateSafeguard } from "../../rules/safeguards";
+import { getPhaseDefinition } from "../../rules/phases";
+import { VERSUS_VERSION } from "../../version";
 
 export const getPhaseStateTool: Tool = {
   name: "get_phase_state",
@@ -149,10 +151,9 @@ export function handleGetPhaseState(engine: StateEngine): string {
   const fitted = fitDecisions(brief, DECISIONS_BUDGET);
   const recentDecisions = fitted.kept;
 
-  // Values only. Since 0.7.0 each entry carries {value, phase, at}, and the stamp
-  // costs about 50 characters — five kilobytes across a hundred entries, for
-  // metadata the model never reads. It exists so an external analysis can date
-  // the spec from state.json on disk, which is where it stays.
+  // Values only. Entries written between 0.7.0 and 0.14.x carry a {value, phase, at}
+  // stamp (research instrumentation, no longer written since 0.15.0); the snapshot
+  // never sends it.
   const spec = state.projectSpec ?? { stack: [], outOfScope: [], patterns: [], constraints: [] };
   const lists = {
     stack: spec.stack.map(specItemValue),
@@ -195,12 +196,23 @@ export function handleGetPhaseState(engine: StateEngine): string {
     }
   }
 
+  // One-time update notice: the first get_phase_state after this project was last opened
+  // by another Versus version. This is the call the model makes first, so it is where the
+  // notice reaches it; the engine records the migration and does not repeat it.
+  const upd = engine.noteVersion();
+  const cycle = engine.currentCycle();
+
   const response: Record<string, unknown> = {
+    // The running build's version, so "which Versus served this session" is in the transcript
+    // as a fact rather than an inference from file dates.
+    header: `[Versus] Phase ${state.currentPhase} — ${getPhaseDefinition(state.currentPhase)?.name ?? "Unknown"} | Iteration ${state.currentIteration} | Cycle ${cycle} | v${VERSUS_VERSION}`,
     projectName: state.projectName,
     projectDescription: state.projectDescription,
     projectSpec,
     currentPhase: state.currentPhase,
     currentIteration: state.currentIteration,
+    currentCycle: cycle,
+    archivedCycles: (state.cycles ?? []).map((c) => c.cycle),
     phase0Score: state.phase0Score,
     decisionsCount: state.decisions.length,
     recentDecisions,
@@ -236,6 +248,16 @@ export function handleGetPhaseState(engine: StateEngine): string {
       `. This host drops an oversized tool result to a file instead of showing it, so the snapshot ` +
       `is kept small on purpose. Call get_decisions(phase) for the full text of any of them — ` +
       `${state.decisions.length} are on record.`;
+  }
+
+  if (upd) {
+    response._versusUpdated =
+      `VERSUS UPDATED — this project was last opened by ${upd.from ? `Versus LocalQwen ${upd.from}` : "a Versus LocalQwen older than 0.15.0"}; ` +
+      `now ${upd.to}. TELL THE USER, once, in your next reply.` +
+      (upd.pending.length
+        ? ` Required from here on and missing in this project: ${upd.pending.slice(0, 6).map((p) => `(${p})`).join(" ")}` +
+          (upd.pending.length > 6 ? ` … +${upd.pending.length - 6} more (see .versus/state.json migrations).` : "")
+        : " Nothing the new version requires is missing.");
   }
 
   if (phase7Hint) {
@@ -298,11 +320,31 @@ export function handleUpdateProjectSpec(
   engine: StateEngine,
   args: { stack?: string[]; outOfScope?: string[]; patterns?: string[]; constraints?: string[] }
 ): string {
+  const values = (xs: SpecItem[]) => xs.map(specItemValue);
+  const before = engine.getProjectSpec();
+  const had = {
+    stack: new Set(values(before.stack)),
+    outOfScope: new Set(values(before.outOfScope)),
+    patterns: new Set(values(before.patterns)),
+    constraints: new Set(values(before.constraints)),
+  };
   engine.updateProjectSpec(args);
-  const spec = engine.getProjectSpec();
+  const after = engine.getProjectSpec();
+  // Return what CHANGED plus counts, not the whole spec. The spec only grows, and on this
+  // host a result past ~8K characters is moved to a file instead of reaching the model; the
+  // whole-spec echo had reached 4,014 characters in a real session. The caller knows what it sent.
+  const added: Record<string, string[]> = {};
+  const counts: Record<string, number> = {};
+  for (const k of ["stack", "outOfScope", "patterns", "constraints"] as const) {
+    const n = values(after[k]).filter((v) => !had[k].has(v));
+    if (n.length) added[k] = n;
+    counts[k] = after[k].length;
+  }
   return JSON.stringify({
     success: true,
-    projectSpec: spec,
-    message: "Project spec updated. This context is returned in every call to get_phase_state.",
+    added,
+    counts,
+    message:
+      "Project spec updated. Values already present were kept, not duplicated. get_phase_state shows the newest entries per list.",
   });
 }

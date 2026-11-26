@@ -14,5 +14,5 @@
     "declaration": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "out", "src/mcp/server.ts", "src/hooks/stop-verify.ts", "src/hooks/truncation-check.ts", "src/hooks/block-destructive.ts"]
+  "exclude": ["node_modules", "out", "src/mcp/server.ts"]
 }

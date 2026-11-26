@@ -1,5 +1,118 @@
 # Changelog
 
+## [0.15.0] - 2026-11-26
+
+Port of Versus Claude 0.18.0 → 0.19.0 (cycle archive, approvals, provenance, version,
+declared checks, promised tests, deviations, scope inventory, lesson guards). Evidence for
+each item is in the Versus Claude changelogs of those versions.
+
+### Measured on this host before porting (delivery channels)
+
+The lesson behind Claude 0.18.0 was that a limit measured on one host had been applied to
+another. Measured here, from the real chat transcripts and not from the code:
+
+- **Where the truth is.** Sessions live in the Windows user's
+  `workspaceStorage/<hash>/chatSessions/*.jsonl`; `metadata.toolCallResults` holds what each
+  tool returned. When Copilot Chat moves a result out of the prompt it writes it to
+  `~/.vscode-server/data/User/workspaceStorage/<hash>/GitHub.copilot-chat/chat-session-resources/<session>/<call>/content.txt`
+  and the model gets a pointer — the existence of that directory is the delivery verdict.
+- **The inline limit is ~8,000 characters, not ~5,700.** Across 13 sessions whose resource
+  directories survive (Copilot Chat 0.58–0.64): every result up to ~8,100 characters arrived
+  inline; from ~11,000 almost all were externalized; 8K–11K was mixed (consistent with a token
+  rather than a character cutoff). The older 5.7K figure was a conservative estimate, so the
+  existing budgets (4,096-character guidance parts and state snapshot) stand, with margin.
+- **A1 (state-only injection, real guidance text): nothing to change here.** This build never
+  injected the guidance; `get_phase_guidance` already pages it. Since 0.12 (2026-09-03 on),
+  **0 of ~890 Versus results were externalized**; the largest were `get_decisions` (6,266),
+  `get_phase_guidance` (4,688), `get_phase_state` (4,582) and `update_project_spec` (4,014,
+  and growing with the spec — fixed below).
+- **A2/A3 do not apply:** no hooks, so no SessionStart/PreCompact and no hook output
+  contracts. The project's instruction file and `get_phase_state` carry the recovery role.
+- **New: `npm run audit-delivery <project>`** (`scripts/audit-delivery.mjs`) reports, per
+  Versus tool, calls, largest result and how many were externalized. Run it after every
+  VS Code / Copilot Chat update and before every release. A session whose resource
+  directory was cleaned up is reported as unknown, never as delivered.
+
+### Added
+
+- **Cycles are archived and readable.** `start_new_cycle` keeps a deep copy of the closing
+  cycle (exit criteria with details and provenance, transitions, last test run) in
+  `cycles[]` before the reset, and writes `.versus/cycles/cycle-N.md`. The Phase 7 approval
+  writes the same record, so a project that ends at Phase 7 leaves it too. New tool
+  `export_cycle(cycle?)` writes any archived cycle or the one in progress. Cycle numbering
+  is fixed: closing cycle 1 announced "cycle 3".
+- **Approvals on the record.** 3→4, 4→5, 6→7 and the cycle close need a `record_decision`
+  of the current pass of the phase with `approvedBy` (new `proposedBy`/`approvedBy` fields).
+  "Current pass" is ordered by `decisionsAt` (the decision count at each transition), not
+  the clock: an approval from before the 2↔3 loop does not carry over. Presence, not truth —
+  the approver is written by the model. Phase 4 guidance now orders report → confirmation →
+  record → advance.
+- **Design fingerprint.** Every transition stores sha256 + size of
+  `specs/technical/architecture.md`: evidence, without git, that the design existed in that
+  content before the code.
+- **Version.** `src/version.ts` is the single source (a test pins it to package.json).
+  New projects carry `versusVersion`; `get_phase_state` opens with
+  `[Versus] Phase N — … | Cycle N | vX.Y.Z` and, the first time a project last opened by an
+  older build is read, carries a one-time `_versusUpdated` notice listing what the new
+  version requires that the project lacks (recorded in `migrations[]`; nothing is created).
+- **Shape gates (0.19.0):** 6→7 needs every `T-xx` of the current architecture version in a
+  test file and a non-empty `## Desvios` section in that version; 5→6 needs a
+  `scope-inventory` decision with ✅/❌ of the current pass of Phase 5; `start_new_cycle`
+  needs a `guard: <id>` or `guard: none` line on every lesson of the current cycle, and
+  marking `lessons_documented` lists the `guard: none` ones for the user. Guidance teaches
+  each record before its gate (Phases 1, 3, 4, 5, 6, 7).
+- **Declared checks — weaker here, and named as such.** `mark_exit_criterion` takes
+  `check_command`/`check_expect` (`exit:<n>` or `output:<regex>`, invalid ones refused);
+  the transition needs a result reported after the declaration that meets it. In Claude a
+  PostToolUse hook witnesses the command; this host has none, so the result comes from the
+  model through the new **`record_check_outcome`** — the same guarantee `record_test_outcome`
+  gives for S6. The engine, not the model, compares the result with the expectation, and
+  re-declaring voids the earlier result. The MCP server runs nothing.
+- **Runs outside the project.** `record_test_outcome` takes an optional `run_dir`, and
+  follows any `cd`/`pushd` in the reported command. A pass from outside the project is
+  recorded with `outsideWorkspace` and does not satisfy `tests_passing`; the call says so at
+  once. Without `run_dir` or a `cd`, nothing changes. Again: only what the model reports.
+
+### Changed
+
+- **`update_project_spec` returns `{added, counts}`** instead of the whole spec (it had
+  reached 4,014 characters and only grows).
+- **S6 pattern is the runner's own simple command**, read by the structural shell reader
+  (`src/shell-parse.ts`, copied from Versus Claude): `; echo "VERSUS_TEST_EXIT=$?"`, pipes,
+  `cd` and flags no longer restart the count. `.versus/test-commands` runners are honoured.
+- **Deploy:** writes `.versus/VERSION`; a missing server bundle is an error message (was a
+  silent return); a window running an older build than the one installed offers
+  **Reload Window**.
+- `npm test` builds first (`pretest`); the tsconfig no longer excludes hook files this build
+  does not have.
+
+### Removed
+
+- **Research instrumentation.** New `projectSpec` entries are plain strings again (stamped
+  `{value, phase, at}` entries on disk are still read). Model-facing texts that justified a
+  rule by "the analysis" or cross-project aggregation now give the gate it protects.
+- The Phase 4 and new-cycle texts no longer tell the model a SessionStart hook will recover
+  the state: this host has none.
+
+### Not ported, and why
+
+- A2–A4 hook items (SessionStart/PreCompact, hook output formats, bundled-hook channel
+  tests, the esbuild `require.main` trap): no hooks in this build. The one bundle (the MCP
+  server) has a single entry with `main()`.
+- The per-message injection budget: there is no per-message injection here.
+
+### Tests
+
+180 (+29 ported; 2 stamp tests rewritten for plain-string spec entries). Fixtures now carry
+the approval at 3/4/6/7, the Phase 5 inventory and a `## Desvios` section. The tool-surface
+pin (< 4,000 tokens) holds at 3,882 after the two new tools — descriptions were trimmed to
+stay under it rather than raising it.
+
+### Open
+
+- `get_decisions` returns every decision in full (6,266 characters at most so far); on a
+  long project it will cross the ~8K inline limit. Not in this port's scope.
+
 ## [0.14.0] - 2026-11-25
 
 Port of Versus Claude 0.17.0: the fixes from the first external study of Versus

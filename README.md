@@ -250,6 +250,10 @@ a hook observes regardless of cooperation, while a tool depends on the model cal
 | Gateway Guard | Acting without loading context | Tool response — appended to every non-exempt call |
 | Phase transition gate | Advancing with criteria unmet or a safeguard violated | Hard — `advance_phase` refuses and names the reason |
 | S6 loop detection | Blind debugging: re-running tests with no named cause | Mixed — `record_test_outcome` feeds it, but a violated S6 vetoes the transition |
+| Approval records | Crossing 3→4, 4→5, 6→7 or closing the cycle with no human sign-off on record | Hard — refused without a `record_decision(category='approval', approvedBy=…)` of the current pass of the phase (presence, not truth) |
+| Shape gates (5→6, 6→7) | Scope Inventory shown but never recorded; promised `T-xx` tests that do not exist; design drift left out of the architecture | Hard — `advance_phase` names what is missing |
+| Declared checks | A mechanically checkable criterion attested instead of run | Mixed — the model reports the run through `record_check_outcome`; the engine compares it with the declared expectation |
+| Cycle archive | A closed cycle's criteria and provenance vanishing at the next one | `start_new_cycle` archives it; `.versus/cycles/cycle-N.md` is the readable record (`export_cycle` for any cycle) |
 | `check_context_budget` | Starting a turn that cannot fit | Advisory — the model must call it before long work |
 | Context health status bar | Silent window loss | Out-of-band — reported from outside the conversation |
 | Phase 7 engine hint | Skipping the meta-iteration offer | Tool response |

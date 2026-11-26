@@ -55,6 +55,11 @@ export const recordTestOutcomeTool: Tool = {
           "'unknown' is recorded and blocks the gate without counting towards S6: reporting it is always " +
           "better than guessing. Report honestly — a false pass hides the loop from you, not from the tests.",
       },
+      run_dir: {
+        type: "string",
+        description:
+          "Where it ran, if not the project root. A pass from outside the project does not satisfy tests_passing.",
+      },
       failed: {
         type: "boolean",
         description: "Deprecated, kept for older callers: true means 'fail', false means 'pass'. Prefer `outcome`.",
@@ -66,7 +71,7 @@ export const recordTestOutcomeTool: Tool = {
 
 export function handleRecordTestOutcome(
   engine: StateEngine,
-  args: { command: string; exit_code?: number; outcome?: "pass" | "fail" | "unknown"; failed?: boolean }
+  args: { command: string; exit_code?: number; outcome?: "pass" | "fail" | "unknown"; failed?: boolean; run_dir?: string }
 ): string {
   const state = engine.getPhaseState();
   if (!state) {
@@ -85,7 +90,7 @@ export function handleRecordTestOutcome(
         : "fail"
       : args.outcome ?? (args.failed === undefined ? "unknown" : args.failed ? "fail" : "pass");
 
-  const { count } = engine.recordTestOutcome(args.command ?? "", outcome, {
+  const { count, outsideWorkspace, runDir } = engine.recordTestOutcome(args.command ?? "", outcome, {
     source: "mcp-tool",
     exitCode,
     exitSource: exitCode !== undefined ? "echo" : undefined,
@@ -93,13 +98,23 @@ export function handleRecordTestOutcome(
       exitCode !== undefined
         ? "exit status relayed from the command's own echo; this host has no hook to capture it directly"
         : "no exit status reported — the verdict is the model's reading of the output",
-  });
+  }, typeof args.run_dir === "string" ? args.run_dir : undefined);
+  const outside = outsideWorkspace
+    ? {
+        outsideWorkspace: true,
+        runDir,
+        _warning:
+          `This run happened OUTSIDE the project (in ${runDir}). It is recorded, but a pass from there does not ` +
+          "satisfy tests_passing: it says nothing about this project's suite. Run it from inside the project.",
+      }
+    : {};
 
   if (outcome === "unknown") {
     return JSON.stringify({
       recorded: "unknown",
       undiagnosedFailures: count,
       threshold: LOOP_FAILURE_THRESHOLD,
+      ...outside,
       note:
         "Recorded as inconclusive. It does not satisfy tests_passing and does not count towards S6. " +
         "Run the suite again with the exit status appended — `<your command>; echo \"VERSUS_TEST_EXIT=$?\"` " +
@@ -118,6 +133,7 @@ export function handleRecordTestOutcome(
       recorded: "pass",
       undiagnosedFailures: 0,
       threshold: LOOP_FAILURE_THRESHOLD,
+      ...outside,
       note: "Counter cleared. A passing run is the end of the work, never a loop.",
     });
   }
@@ -127,6 +143,7 @@ export function handleRecordTestOutcome(
     undiagnosedFailures: count,
     threshold: LOOP_FAILURE_THRESHOLD,
     s6Violated: blocked,
+    ...outside,
     _nextAction: blocked
       ? "STOP. S6 is violated and the next phase transition is vetoed. Do NOT run the tests again. " +
         "Either name the root cause now via record_decision(category='diagnosis', content='<cause + " +

@@ -9,6 +9,7 @@ import { ContextStatus } from "./views/context-status";
 import { reportSiblings } from "./views/sibling-check";
 import { ensureEstimatorClamp } from "./views/estimator-patch-ui";
 import { ensureSpecsReadme, writeAgentInstructions } from "./setup";
+import { VERSUS_VERSION } from "./version";
 import { bestAskTool, looksLikeAskTool, rankAskTools } from "./ask-tool";
 import { advertisedBudget, effectiveWindow, modelInfo } from "./ollama/client";
 import { alignModelContext } from "./ollama/align";
@@ -609,6 +610,25 @@ export function activate(context: vscode.ExtensionContext) {
       log("No Versus project in this workspace — nothing to do on activation.");
     }
 
+    // A window keeps running the Versus it activated with. Installing a new version does not
+    // redeploy .versus/ in windows already open (a sibling build ran a whole cycle on the old
+    // version that way). VS Code tells the running extension when the installed set changes,
+    // so offer the reload that deploys the new build.
+    context.subscriptions.push(
+      vscode.extensions.onDidChange(() => {
+        const installed = vscode.extensions.getExtension("JasmineMoreira.versus-localqwen")?.packageJSON?.version;
+        if (installed && installed !== VERSUS_VERSION && fs.existsSync(path.join(workspacePath ?? "", ".versus", "state.json"))) {
+          vscode.window
+            .showWarningMessage(
+              `Versus LocalQwen ${installed} is installed, but this window is still running ${VERSUS_VERSION}: this ` +
+              `project's MCP server stays on ${VERSUS_VERSION} until the window reloads.`,
+              "Reload Window"
+            )
+            .then((a) => { if (a === "Reload Window") vscode.commands.executeCommand("workbench.action.reloadWindow"); });
+        }
+      })
+    );
+
     log("Activation completed successfully.");
   } catch (err) {
     log(`ACTIVATION ERROR: ${String(err)}`);
@@ -619,7 +639,15 @@ export function activate(context: vscode.ExtensionContext) {
 /** Copies server.js (MCP server) from the extension to .versus/ of the workspace */
 function deployServer(extensionPath: string, workspacePath: string) {
   const src = path.join(extensionPath, "out", "bundle", "server.js");
-  if (!fs.existsSync(src)) return;
+  if (!fs.existsSync(src)) {
+    // Was a silent return: the project kept whatever server it had (or none), and the
+    // methodology tools failed or ran stale with nothing saying why.
+    vscode.window.showErrorMessage(
+      `Versus LocalQwen ${VERSUS_VERSION}: the MCP server bundle (out/bundle/server.js) is missing from the ` +
+      `extension and was NOT deployed to this project. Reinstall the extension.`
+    );
+    return;
+  }
 
   const targetDir = path.join(workspacePath, ".versus", BUNDLE_DIR);
   if (!fs.existsSync(targetDir)) {
@@ -645,6 +673,8 @@ function deployServer(extensionPath: string, workspacePath: string) {
   if (!destContent || !srcContent.equals(destContent)) {
     fs.writeFileSync(dest, srcContent);
   }
+  // Which Versus is deployed in this project, readable by people and by the delivery audit.
+  fs.writeFileSync(path.join(workspacePath, ".versus", "VERSION"), VERSUS_VERSION + "\n");
 }
 
 /** Creates specs/ with 9 subdirectories + README.md */

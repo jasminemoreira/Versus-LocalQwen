@@ -432,6 +432,8 @@ The \`M-\\d+\` id exists only to make the row recognisable to the gate. **The st
 
 **Number the premises the design leans on** — \`A-1\`, \`A-2\`, … — instead of leaving them in prose. A numbered premise is one Phase 6 can come back and check by id; an unnumbered one is a claim nobody can point at afterwards, which is how an assumption fails silently. Phase 6 asks for a \`premise-coverage.md\` keyed on these ids, and only where they exist.
 
+**Give every PROMISED TEST an id (\`T-01\`, \`T-02\`, …).** When the design says a property will be verified ("a fast double-tap triggers X", "the ready flag is set only with the hashed run id"), write it with an id in the architecture. Phase 6 is BLOCKED until every \`T-xx\` of the current architecture version appears in a test file (in the test's name or a comment). A promise left only in the design was, in an audited project, a test that never existed as promised.
+
 **Each \`## V(N)\` section carries the COMPLETE module table, not a delta.** Writing only what changed reads identically to writing a design where the omitted modules are gone, and nothing can tell the two apart afterwards. Repeating the unchanged rows is cheap; an ambiguous version is not.
 
 Assumptions and anything the table cannot hold go in prose below it. advance_phase to Phase 2 is BLOCKED until the file exists and holds at least one module row. The engine checks the shape, not whether the decomposition is good — that judgement stays yours.
@@ -515,9 +517,9 @@ Each finding gets its own id. Where two findings overlap, say so with \`duplica:
 
 **The \`module\` column takes a module name from the table in \`specs/technical/architecture.md\`, spelled the same way** — the name is what ties a finding to a design, and Phase 3 routes by it. The gate checks it on 2→3, against ANY \`## V(N)\` version: a module that V(2) removed is still the right name for a finding iteration 1 raised against V(1), so removal is tolerated. A name that appears in no version at all is drift and blocks — either fix it to the Phase 1 name, or add the module to the architecture table.
 
-**The \`lens\` column takes the canonical lens name, in English, exactly as this guidance spells it** — \`Security\`, not "Segurança" or "SEG"; \`Sustainability / Proportionality\`, not \`Sustainability\`. The name is the join key: matrices from different projects only aggregate if the lens is written the same way in all of them, and a truncated name aggregates as a different lens without anyone noticing. The gate reads this column on 2→3: only case and the spacing around a slash vary, and a conditional lens must be in the set recorded for THAT round's \`## Iteração N\`. A finding that fits no lens at all takes the literal \`NENHUMA\` rather than the nearest lens.
+**The \`lens\` column takes the canonical lens name, in English, exactly as this guidance spells it** — \`Security\`, not "Segurança" or "SEG"; \`Sustainability / Proportionality\`, not \`Sustainability\`. The gate matches each finding's lens against the lenses declared for its round, and a translated or truncated name cannot be matched. It reads this column on 2→3: only case and the spacing around a slash vary, and a conditional lens must be in the set recorded for THAT round's \`## Iteração N\`. A finding that fits no lens at all takes the literal \`NENHUMA\` rather than the nearest lens.
 
-**The \`severity\` column is checked the same way** — exactly one of 🔴 / 🟡 / 🟢. A word beside the glyph is fine (\`🔴 Critical\`); \`high\`, \`P1\`, an empty cell and two glyphs in one cell are not, because the analysis counts criticals against important on this column and none of those can be counted.
+**The \`severity\` column is checked the same way** — exactly one of 🔴 / 🟡 / 🟢. A word beside the glyph is fine (\`🔴 Critical\`); \`high\`, \`P1\`, an empty cell and two glyphs in one cell are not, because Phase 6 traces every 🔴 to a test (critical-coverage.md), and none of those can be read as one.
 
 Use a consistent id prefix per lens within the project — \`P-\` for Security findings, \`A-\` for Assumptions, and so on — so an id alone says which lens produced it. **The prefix \`M-\` is RESERVED for modules (Phase 1's architecture table) — never use it for a finding; the Mechanical Engineering lens uses \`MEC-\`, not \`M-\`.** A finding carrying \`M-\` would be indistinguishable from a module row, and the gate discards it from the count for exactly that reason.
 
@@ -557,7 +559,7 @@ Trade-offs resolved by the HUMAN OPERATOR (S2: stopping criterion is the user's)
 Address the findings **by id**, one at a time, from that file rather than from memory — Phase 2 wrote it precisely so this phase survives a compaction between the two. Record what each id resolved to, and where a finding was accepted as risk rather than fixed, record_decision it against its id. An id you cannot account for is scope you deferred silently (AP10).
 
 ### Updating the architecture doc: APPEND V(N+1), never overwrite V(N).
-Add a new \`## V(N+1)\` section to \`specs/technical/architecture.md\`, with its own module table — do NOT replace the previous one. The Phase 2↔3 loop critiques a DIFFERENT architecture each round: a finding from iteration 1 can name a module that V(2) removed. Overwrite it and that finding points at a module no artifact records any more, so the per-module traceability the coverage matrix exists for breaks exactly where the design changed most. Keep every version; the last section is the current one.
+Add a new \`## V(N+1)\` section to \`specs/technical/architecture.md\`, with its own module table — do NOT replace the previous one. The Phase 2↔3 loop critiques a DIFFERENT architecture each round: a finding from iteration 1 can name a module that V(2) removed. Overwrite it and that finding points at a module no artifact records any more, so the per-module traceability the coverage matrix exists for breaks exactly where the design changed most. Keep every version; the last section is the current one. Carry over the \`T-xx\` test promises that still hold into V(N+1), and drop the ones the simplification removed: Phase 6 checks the CURRENT version's ids against the test files.
 
 ### Purpose: Simplify V(N) → V(N+1), eliminating complexity.
 **CAUTION AP2 (Complexity as false solution):** Each iteration must SIMPLIFY, not complexify.
@@ -595,7 +597,7 @@ Present the recommendation and ask: accept recommendation / override (user choos
 The user validates the RECOMMENDATION, not the raw data.
 
 **Step 4 — Execute (do NOT stop after confirmation — execute the agreed action immediately):**
-- "→ Phase 4": call advance_phase(target_phase=4) then get_phase_guidance() to load Phase 4 instructions
+- "→ Phase 4": FIRST record the convergence approval — \`record_decision(phase=3, category='approval', content='<why this version is ready: what changed, what the user reviewed>', proposedBy='<who proposed converging>', approvedBy='<who approved>')\` — then call advance_phase(target_phase=4), then get_phase_guidance() to load Phase 4 instructions. 3→4 is BLOCKED without an approval decision of this pass of Phase 3.
 - "1 more iteration" or "Multiple iterations": call start_iteration(phase=3), then announce return to Phase 2 critique — call advance_phase(target_phase=2) to go back to the critique loop
 
 **CAUTION AP8 (Perfectionism):** The stopping criterion is honesty — we know what works, what we assume, and what we don't know.
@@ -628,7 +630,7 @@ Inform the user: "The architecture is fully validated. From Phase 5 onward, you 
 
 **HOW TO SWITCH CLEANLY:** Do NOT change the model in the current chat. Mid-conversation switching makes the new (smaller-context) model try to compact the previous session, which destroys the structured context that Versus preserves via MCP. Instead:
 1. Close the current chat and open a NEW chat with the target model
-2. Type \`retomar Versus\` — the SessionStart hook recovers state via MCP cleanly (phase, decisions, specs/), no compaction needed
+2. Type \`retomar Versus\` — the project's instruction file tells the new model to call get_phase_state and get_phase_guidance, which recover the state cleanly (phase, decisions, specs/), no compaction needed
 3. The new model starts fresh but with full methodology state"
 
 ### Next Step (MANDATORY — do NOT stop after the convergence report):
@@ -639,9 +641,10 @@ When ALL items are ✅:
    - **"Switch model"** — close this chat, open a new one with the target model, type \`retomar Versus\`
 
    This is a DECISION, not a notice. Do NOT write "I am advancing to Phase 5; interrupt me if you want to switch" — announcing and proceeding puts the burden of interrupting on the user, at the one moment where the choice is cheapest to make. It is only free BEFORE any code exists: once Phase 5 has written files, switching means abandoning a session mid-implementation.
-3. Call advance_phase(target_phase=5) — in BOTH cases. Phase 4's gate is already satisfied; a new session should resume at Phase 5, not re-run the convergence check. The transition returns a pause message that restates this same choice: acknowledge it, do NOT ask a second time.
-4. If the user chose "Switch model": call record_decision(phase=4, category='process', content='LLM SWITCH: user will resume Phase 5 in a new chat with <model>') and STOP your response. Do not start implementing.
-5. If the user chose "Continue here": call get_phase_guidance() to load Phase 5 implementation instructions and begin — consult specs/ for the first module and start coding.
+3. **Record the convergence confirmation** — the user's answer to the report you DISPLAYED (the report is shown BEFORE advancing, never after): \`record_decision(phase=4, category='approval', content='<report verdict ✅/❌ per item and what the user confirmed>', approvedBy='<who>')\`. **advance_phase(target_phase=5) is BLOCKED without it** (S4: in Phase 4 the human confirms convergence). Ask for this confirmation in the SAME question as the model-switch choice.
+4. Call advance_phase(target_phase=5) — in BOTH cases. Phase 4's gate is then satisfied; a new session should resume at Phase 5, not re-run the convergence check. The transition returns a pause message that restates this same choice: acknowledge it, do NOT ask a second time.
+5. If the user chose "Switch model": call record_decision(phase=4, category='process', content='LLM SWITCH: user will resume Phase 5 in a new chat with <model>') and STOP your response. Do not start implementing.
+6. If the user chose "Continue here": call get_phase_guidance() to load Phase 5 implementation instructions and begin — consult specs/ for the first module and start coding.
 If any item is ❌: do NOT advance — return to Phase 2 or 3 as needed (call advance_phase(target_phase=2) or advance_phase(target_phase=3)).`;
 
 // [G6] decoupled sessions + [G8] AV types
@@ -748,6 +751,10 @@ After all modules are implemented AND Original Scope Review was completed (with 
 3. **UI runnable — empirical proof, not prose?** If the project has a UI module (listed in P1 decomposition): you MUST ask the user to execute AT LEAST ONE Phase 0 use case end-to-end and report whether it worked. Only mark met=true if user explicitly confirms. The \`details\` field MUST contain the user's literal confirmation, e.g. "User executed UC-1 (login→dashboard) and confirmed it works". For backend-only: mark_exit_criteria(phase=5, criterion='ui_runnable', met=true, details='N/A — backend-only, no UI module in P1').
 
 **CAUTION AP10 (Silent scope deferral):** Marking ui_runnable as met=true with prose like "UI rendered but content missing" or "engine works but assets pending" is forbidden. If the use case from P0 cannot be executed end-to-end by a human, the criterion is met=false. Either: (a) complete the missing pieces before advancing, OR (b) renegotiate the Delivery Target via record_decision(category='scope').
+
+**Record it:** \`record_decision(phase=5, category='scope-inventory', content='<each item with ✅/❌>')\`. advance_phase(target_phase=6) is BLOCKED without a Scope Inventory of this pass of Phase 5; displaying it in chat is not a record.
+
+**Undiscussed choices (one record, short):** before leaving Phase 5, list the choices implementation made that nobody discussed: tuning numbers, defensive guards, accessibility, visual/CSS details, one line each WITH its reason. Record them as \`record_decision(phase=5, category='undiscussed-choices', content='<one line per choice: what — why>')\`. Phase 5 decisions tend to say WHAT was done; this is the WHY of what was never put to the user. An audit found 18–19% of the code's elements with no record at all.
 
 Scope inventory = **presence/absence check** (not quality — that is Phase 6's job) AND **empirical use-case validation** (not just file existence).
 If any ❌: implement the missing module/requirement before advancing.
@@ -917,10 +924,19 @@ After each fix, record a testing decision noting: what was fixed, what still nee
 This ensures the NEXT session knows exactly what changed since the last test round.
 
 ### tests_passing is witnessed, not asserted:
-advance_phase to Phase 7 is BLOCKED until a passing run is recorded in THIS phase via \`record_test_outcome(command, failed=false)\`. This host has no hook watching your shell, so a run you do not report is a run the engine did not see. S4 — never assume tests passed, execute and verify.
+advance_phase to Phase 7 is BLOCKED until a passing run is recorded in THIS phase via \`record_test_outcome(command, exit_code=<n>)\`. This host has no hook watching your shell, so a run you do not report is a run the engine did not see. Run the suite from inside the project; if you ran it somewhere else, say so with \`run_dir\` — a pass from outside the project is recorded but does not count. S4 — never assume tests passed, execute and verify.
+
+### Record how the code departed from the design (BLOCKS 6→7):
+In the CURRENT version section of \`specs/technical/architecture.md\`, add a \`## Desvios\` section: every way the code deviated from that design, one line each with the reason (a timing that changed, a mechanism replaced, a state removed), or the single word \`nenhum\`. An audited project's architecture still described an element the code had removed, and its timings had doubled: the next cycle would have designed against a design that no longer existed.
+
+### Promised tests exist (BLOCKS 6→7):
+Every \`T-xx\` in the current architecture version must appear in a test file. If a promise was dropped, say so under \`## Desvios\` and remove the id.
+
+### A criterion you can check mechanically is CHECKED, not attested:
+If a criterion's truth is a command ("OAuth removed from all 4 services" = a grep that finds nothing), declare it: \`mark_exit_criterion(..., check_command='grep -rli oauth services/ | wc -l', check_expect='output:^\\\\s*0\\\\s*$')\`, run that exact command in the terminal (for an exit-code expectation, append \`; echo "VERSUS_EXIT=$?"\`), then report it: \`record_check_outcome(criterion, output, exit_code?)\`. The transition is BLOCKED until a reported result meets the expectation — the engine compares, not you. An audit found exactly such a criterion ("grep = 0") attested while one service still used OAuth.
 
 ### Next Step (MANDATORY — do NOT stop after manual testing is complete):
-When all tests pass and manual testing is done: call advance_phase(target_phase=7) then get_phase_guidance() to load Phase 7 post-review instructions.`;
+When all tests pass and manual testing is done: record the test sign-off — \`record_decision(phase=6, category='approval', content='<what the user ran and saw: device, versions, what they asked for, what they found, their verdict in their words>', approvedBy='<who>')\` (6→7 is BLOCKED without it) — then call advance_phase(target_phase=7) and get_phase_guidance() to load Phase 7 post-review instructions.`;
 
 // [G5] Meta-iteration v1→v2 + [G8] AV type
 const PHASE_7_GUIDANCE = `## Phase 7 — Post-Review
@@ -946,13 +962,17 @@ Deposit lessons in specs/technical or specs/references — they become valuable 
 ### Persist the lessons (MANDATORY):
 Write them to \`specs/references/lessons.md\`: domain, stack, patterns, wrong assumptions, and what the process itself cost. start_new_cycle is BLOCKED until the file exists — the next cycle inherits these lessons, and a conversation about to be replaced is not where they can live.
 
+**Each lesson says whether it became a guard:** a line \`guard: <test id>\` (the test that now catches it) or \`guard: none\`. start_new_cycle is BLOCKED while any lesson lacks that line, and marking lessons_documented lists the \`guard: none\` ones: show them to the user and ask whether any should become a test now. In an audited project a lesson kept as text did not stop the same bug from coming back; the test that existed did.
+
+**Record the close approval** — \`record_decision(phase=7, category='approval', content='<what the user reviewed and accepted>', approvedBy='<who>')\`. Recording it writes the cycle's readable record to \`.versus/cycles/cycle-N.md\` — that file is the record if the project ends here — and start_new_cycle is BLOCKED without it.
+
 ### Meta-iteration v1.0 → v2.0 (⚠️ MUST DISPLAY offer in chat):
 After completing all Phase 7 steps, you MUST offer the user the option to start a new development cycle:
 - Option 1: "Start v2.0 cycle" — calls start_new_cycle() to reset to Phase 0 while preserving all context
 - Option 2: "Project complete" — no further action, methodology concludes
 
 If the user chooses to start a new cycle:
-1. Call start_new_cycle() — this preserves decisions, projectSpec, history, and specs/
+1. With the close approval recorded (above), call start_new_cycle() — this preserves decisions, projectSpec, history, and specs/, and ARCHIVES this cycle (exit criteria, transitions, test run) with a readable export in .versus/cycles/cycle-N.md
 2. specs/ from the previous cycle is the BASELINE — knowledge is NOT lost between cycles
 3. Phase 0 of the new cycle starts from existing specs/ (doesn't restart from zero)
 4. Previous decisions (get_decisions) serve as context — what was discarded and why
