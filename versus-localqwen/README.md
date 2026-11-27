@@ -2,7 +2,7 @@
 
 **IACDM orchestrator for local models served by Ollama in VS Code Agent Mode.**
 
-Same methodology as [Versus · Copilot](https://marketplace.visualstudio.com/items?itemName=JasmineMoreira.versus-copilot) and [Versus · Claude](https://marketplace.visualstudio.com/items?itemName=JasmineMoreira.versus-claude): eight sequential phases, adversarial critique lenses, verification gates, and a decision registry that survives context loss. What differs is the operating regime — and one failure mode that only appears with local models.
+Same methodology as [Versus · Claude](https://marketplace.visualstudio.com/items?itemName=JasmineMoreira.versus-claude), [Versus · Qwen](https://marketplace.visualstudio.com/items?itemName=JasmineMoreira.versus-qwen), [Versus · Kimi](https://marketplace.visualstudio.com/items?itemName=JasmineMoreira.versus-kimi) and [Versus · Cursor](https://open-vsx.org/extension/jmoreira/versus-cursor): eight sequential phases, adversarial critique lenses, verification gates, and a decision registry that survives context loss. What differs is the operating regime — and one failure mode that only appears with local models.
 
 ## The failure this extension exists to catch
 
@@ -225,9 +225,9 @@ At any point, typing `retomar Versus` in chat reloads phase, decisions and instr
 
 **No hooks.** Versus for Qwen ships seven Qwen Code CLI hooks — context injection, phase gating, loop detection, destructive-command blocking, truncation detection, stop verification. VS Code chat has no hook system. Those safeguards live inside MCP tool responses instead, and truncation detection moved to the status bar, where it can watch the server directly.
 
-**No full-guidance injection.** Versus for Qwen injects the complete methodology on every `UserPromptSubmit`, betting on prompt caching to absorb the cost. That guidance tokenizes to **13861 tokens** on Qwen3.6 — over a fifth of a 64k window, every turn, before a single file is read. This extension keeps the Copilot design: guidance served per phase on demand through `get_phase_guidance`, costing 680 to 2900 tokens depending on the phase.
+**No full-guidance injection.** Versus for Qwen once injected the complete methodology on every `UserPromptSubmit` (until 0.12.0), betting on prompt caching to absorb the cost. That guidance tokenizes to **13861 tokens** on Qwen3.6 — over a fifth of a 64k window, every turn, before a single file is read. This extension never did; like the rest of the family today, it uses the design of the (now discontinued) Copilot build: guidance served per phase on demand through `get_phase_guidance`, costing 680 to 2900 tokens depending on the phase.
 
-**Shared state.** `.versus/state.json` uses the same schema as the rest of the family, so a project can move between Versus for Claude, Copilot and this one without losing phase or decisions.
+**Shared state.** `.versus/state.json` uses the same schema as the rest of the family, so a project can move between Versus for Claude, Qwen, Kimi, Cursor and this one without losing phase or decisions.
 
 ## A note on chat templates
 
@@ -242,7 +242,7 @@ Unchanged from the family. See the [Versus README](https://github.com/jasminemor
 ```
 Phase 0: Problem Discovery    → HSA 5-level exploration (score >= 90 to advance)
 Phase 1: Architecture         → Define modules, interfaces, patterns
-Phase 2: Adversarial Critique → Attack the architecture with specialized lenses
+Phase 2: Adversarial Critique → Attack the architecture with up to 19 specialized lenses
 Phase 3: Simplification       → Address criticals, simplify (loops with Phase 2)
 Phase 4: Convergence Gate     → Validate all exit criteria + safeguards
 Phase 5: Implementation       → Code the final architecture
